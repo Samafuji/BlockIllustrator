@@ -129,6 +129,39 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  // Ctrl+C / Ctrl+X / Ctrl+V: nodes (and the connections between them) travel as DSL text,
+  // so they can also be pasted into another diagram, window or a text editor.
+  useEffect(() => {
+    const onCopy = (e: ClipboardEvent) => {
+      if (isTyping(e.target)) return;
+      const text = useStore.getState().copySelectionText();
+      if (!text) return;
+      e.clipboardData?.setData('text/plain', text);
+      e.preventDefault();
+    };
+    const onCut = (e: ClipboardEvent) => {
+      if (isTyping(e.target)) return;
+      const text = useStore.getState().copySelectionText();
+      if (!text) return;
+      e.clipboardData?.setData('text/plain', text);
+      e.preventDefault();
+      useStore.getState().deleteSelection();
+    };
+    const onPaste = (e: ClipboardEvent) => {
+      if (isTyping(e.target)) return;
+      const text = e.clipboardData?.getData('text/plain');
+      if (text && useStore.getState().pasteText(text)) e.preventDefault();
+    };
+    document.addEventListener('copy', onCopy);
+    document.addEventListener('cut', onCut);
+    document.addEventListener('paste', onPaste);
+    return () => {
+      document.removeEventListener('copy', onCopy);
+      document.removeEventListener('cut', onCut);
+      document.removeEventListener('paste', onPaste);
+    };
+  }, []);
+
   useEffect(() => {
     const onUnload = (e: BeforeUnloadEvent) => {
       if (useStore.getState().dirty && useStore.getState().fileName) {

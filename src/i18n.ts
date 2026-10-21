@@ -251,6 +251,7 @@ const D: Record<string, [string, string]> = {
   'Shift+クリック / 範囲ドラッグで複数選択。整列はツールバーまたは Alt+A/H/D/W/V/S': ['Shift+click or rubber-band to multi-select; align from the toolbar or Alt+A/H/D/W/V/S', 'Shift+點選或框選可多選；用工具列或 Alt+A/H/D/W/V/S 對齊'],
   'ホイール: スクロール / Ctrl+ホイール: ズーム / Space+ドラッグ・中ボタン: パン': ['Wheel: scroll / Ctrl+wheel: zoom / Space+drag or middle button: pan', '滾輪：捲動 / Ctrl+滾輪：縮放 / Space+拖曳或中鍵：平移'],
   'Delete 削除、Ctrl+D 複製、Ctrl+Z 元に戻す、矢印キーで微調整': ['Delete, Ctrl+D duplicate, Ctrl+Z undo, arrow keys nudge', 'Delete 刪除、Ctrl+D 複製、Ctrl+Z 復原、方向鍵微調'],
+  'Ctrl+C / Ctrl+X / Ctrl+V でコピー・切り取り・貼り付け（別の図やテキストエディタにも貼れます）': ['Ctrl+C / Ctrl+X / Ctrl+V copy, cut and paste (also into another diagram or a text editor)', 'Ctrl+C / Ctrl+X / Ctrl+V 複製、剪下、貼上 (也可貼到其他圖或文字編輯器)'],
   'ラベル内の $...$ は LaTeX 数式（例: $G(s)=\\frac{1}{s+1}$）': ['$...$ in labels is LaTeX math (e.g. $G(s)=\\frac{1}{s+1}$)', '標籤中的 $...$ 為 LaTeX 數式 (例：$G(s)=\\frac{1}{s+1}$)'],
 
   // ---- canvas

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { syncCode } from '../dsl/generator';
+import { edgeToLine, nodeToLine, syncCode } from '../dsl/generator';
 import { ParseResult, parse } from '../dsl/parser';
 import {
   DEdge,
@@ -62,7 +62,8 @@ export interface StoreState {
 
   // ---- GUI side
   liveUpdate: (fn: (d: Diagram) => void) => void;
-  commit: (fn?: (d: Diagram) => void, opts?: { renamed?: Record<string, string> }) => void;
+  /** `coalesce`: consecutive commits with the same key within ~1.2 s share one undo step (color pickers, spinners) */
+  commit: (fn?: (d: Diagram) => void, opts?: { renamed?: Record<string, string>; coalesce?: string }) => void;
   undo: () => void;
   redo: () => void;
 
@@ -84,6 +85,10 @@ export interface StoreState {
   addEdge: (from: string, to: string, fromSide?: Side, toSide?: Side) => void;
   deleteSelection: () => void;
   duplicateSelection: () => void;
+  /** DSL text of the selected nodes and the connections between them (for the clipboard) */
+  copySelectionText: () => string;
+  /** paste DSL text (from copySelectionText or any .bd snippet); returns false if nothing was pasted */
+  pasteText: (text: string) => boolean;
   renameNode: (oldId: string, newId: string) => boolean;
   updateNode: (id: string, patch: Partial<DNode>, live?: boolean) => void;
   updateEdge: (id: string, patch: Partial<DEdge>, live?: boolean) => void;
@@ -118,6 +123,8 @@ function readBool(key: string, def: boolean): boolean {
 }
 
 let autosaveTimer: number | undefined;
+let lastCommit: { key: string | null; time: number } = { key: null, time: 0 };
+let lastCopied: { text: string; pastes: number } | null = null;
 function scheduleAutosave(code: string) {
   if (autosaveTimer) window.clearTimeout(autosaveTimer);
   autosaveTimer = window.setTimeout(() => {
@@ -219,7 +226,10 @@ export const useStore = create<StoreState>((set, get) => {
         set({ diagram: st.parse.diagram });
         return;
       }
-      applyCode(newCode, { history: true });
+      const now = Date.now();
+      const coalesce = !!opts?.coalesce && lastCommit.key === opts.coalesce && now - lastCommit.time < 1200;
+      applyCode(newCode, { history: !coalesce });
+      lastCommit = { key: opts?.coalesce ?? null, time: now };
       // keep selection consistent (edge ids may have been renumbered)
       const nd = get().diagram;
       const sel = get().selection;
@@ -402,7 +412,7 @@ export const useStore = create<StoreState>((set, get) => {
         for (const k of Object.keys(patch) as (keyof DNode)[]) if (patch[k] === undefined) delete n[k];
       };
       if (live) get().liveUpdate(fn);
-      else get().commit(fn);
+      else get().commit(fn, { coalesce: `node:${id}:${Object.keys(patch).sort().join(',')}` });
     },
 
     updateEdge(id, patch, live) {
@@ -413,7 +423,7 @@ export const useStore = create<StoreState>((set, get) => {
         for (const k of Object.keys(patch) as (keyof DEdge)[]) if (patch[k] === undefined) delete e[k];
       };
       if (live) get().liveUpdate(fn);
-      else get().commit(fn);
+      else get().commit(fn, { coalesce: `edge:${id}:${Object.keys(patch).sort().join(',')}` });
     },
 
     updateStyle(patch, live) {
@@ -421,7 +431,62 @@ export const useStore = create<StoreState>((set, get) => {
         Object.assign(d.style, patch);
       };
       if (live) get().liveUpdate(fn);
-      else get().commit(fn);
+      else get().commit(fn, { coalesce: `style:${Object.keys(patch).sort().join(',')}` });
+    },
+
+    copySelectionText() {
+      const st = get();
+      const ids = new Set(st.selection.nodes);
+      if (ids.size === 0) return '';
+      const lines: string[] = [];
+      for (const n of st.diagram.nodes) if (ids.has(n.id)) lines.push(nodeToLine(n));
+      for (const e of st.diagram.edges) if (ids.has(e.from) && ids.has(e.to)) lines.push(edgeToLine(e));
+      const text = lines.join('\n') + '\n';
+      lastCopied = { text, pastes: 0 };
+      return text;
+    },
+
+    pasteText(text) {
+      const parsed = parse(text);
+      if (parsed.diagram.nodes.length === 0) return false;
+      const st = get();
+      // repeated pastes of our own copy are offset so they do not land on top of the original
+      const own = lastCopied !== null && lastCopied.text === text;
+      const step = (st.diagram.style.grid || 10) * 3;
+      const k = own ? ++lastCopied!.pastes : 0;
+      const off = { x: step * k, y: step * k };
+      const idMap: Record<string, string> = {};
+      const newIds: string[] = [];
+      get().commit((d) => {
+        const taken = new Set(d.nodes.map((n) => n.id));
+        for (const n of parsed.diagram.nodes) {
+          let id = n.id;
+          if (taken.has(id)) {
+            const base = id.replace(/\d+$/, '') || TYPE_PREFIX[n.type];
+            let i = 2;
+            while (taken.has(`${base}${i}`)) i++;
+            id = `${base}${i}`;
+          }
+          taken.add(id);
+          idMap[n.id] = id;
+          newIds.push(id);
+          d.nodes.push({ ...JSON.parse(JSON.stringify(n)), id, x: n.x + off.x, y: n.y + off.y });
+        }
+        let count = d.edges.length;
+        for (const e of parsed.diagram.edges) {
+          if (!idMap[e.from] || !idMap[e.to]) continue;
+          count++;
+          d.edges.push({
+            ...JSON.parse(JSON.stringify(e)),
+            id: `e${count}`,
+            from: idMap[e.from],
+            to: idMap[e.to],
+            waypoints: e.waypoints.map((p) => ({ x: p.x + off.x, y: p.y + off.y })),
+          });
+        }
+      });
+      set({ selection: { nodes: newIds, edges: [] } });
+      return true;
     },
 
     insertJunctionOnEdge(edgeId, at) {
