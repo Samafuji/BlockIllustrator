@@ -1,2 +1,7 @@
-# Auto detect text files and perform LF normalization
+# Normalize line endings so scripts work on every OS after checkout
 * text=auto
+*.sh text eol=lf
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bd text
+dist/index.html -diff
