@@ -86,7 +86,9 @@ function NodeShape({ box, style, selected, hover, edit }: { box: Box; style: DSt
       }
       break;
     case 'text':
-      shape = <rect x={x} y={y} width={w} height={h} fill="transparent" stroke="none" />;
+      // hit area for the editor only. Never export it: PowerPoint's SVG renderer does not
+      // understand fill="transparent" and paints such rectangles black.
+      shape = edit ? <rect x={x} y={y} width={w} height={h} fill="transparent" stroke="none" /> : null;
       break;
   }
   return (
