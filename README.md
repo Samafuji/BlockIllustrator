@@ -3,22 +3,53 @@
 ブロック線図（制御系のブロックダイアグラム）を **コード** と **GUI** の両方から作成・編集できるエディタです。
 PowerPoint や Illustrator を使わずに、論文・資料品質の図を SVG / PNG / PDF で出力できます。
 
-## 起動方法
+## 使い方（Node.js / npm が無くても使えます）
+
+アプリはビルド済みの **1 ファイル（`dist/index.html`）** に全部入っているので、Node.js や npm は不要です。次のどれかを選んでください。
+
+| 方法 | 手順 | 向いている人 |
+| --- | --- | --- |
+| **A. GitHub Pages（インストール不要）** | ブラウザで公開 URL を開くだけ: `https://<ユーザー名>.github.io/BlockIllustrator/` | とりあえず使いたい人 |
+| **B. ファイルを開く** | GitHub の `dist/index.html` を Raw からダウンロードし、Chrome / Edge でダブルクリック | オフラインで使いたい人 |
+| **C. ローカルサーバー** | リポジトリを ZIP で取得し、Windows は `serve.cmd` をダブルクリック、macOS / Linux は `./serve.sh`。`http://localhost:8000/` が開きます | ファイル直開きで不具合がある人 |
+
+- `serve.cmd` は Windows 標準の PowerShell だけで動く小さな HTTP サーバーです（Node.js も Python も不要）。ポートを変えるときは `serve.cmd -Port 8080`。
+- `serve.sh` は python3 → python → Node.js の順に探して使います。
+- 図のデータは `.bd` ファイルとして自分の PC に保存されます（サーバーには何も送られません）。ブラウザ内の自動保存は「そのブラウザ・その URL」ごとに別です。
+
+### 方法 A のための公開設定（リポジトリ管理者が 1 回だけ）
+
+1. GitHub のリポジトリ → **Settings → Pages → Build and deployment → Source** を **GitHub Actions** にする。
+2. `main` に push すると `.github/workflows/pages.yml` が自動でビルドして公開します（数分）。
+
+### 既知の制限・注意
+
+- 推奨ブラウザは Chrome / Edge です。Firefox / Safari では「保存」が上書きではなくダウンロードになり、「PNG をクリップボードにコピー」は使えません（他の機能は動きます）。
+- Times New Roman などのフォントは閲覧する PC にインストールされているものが使われます。無い環境では代替フォントになります（SVG / 印刷 PDF も同様）。EPS と通常の PDF は PostScript 標準フォント（Times / Helvetica / Courier）に置き換わるので環境に依存しません。
+- 日本語・中国語を含む図を PDF にするときは「PDF（ブラウザ印刷）」を使ってください（通常の PDF / EPS は欧文フォントのみ）。
+- `dist/index.html` は約 3.5 MB あります。初回表示に数秒かかることがあります。
+
+### 開発者向け（ソースから動かす）
 
 ```bash
 npm install
-npm run dev
+npm run dev      # http://localhost:5173
+npm run build    # dist/index.html を再生成（1 ファイル完結）
 ```
 
-ブラウザで <http://localhost:5173> を開きます。
+`start.cmd` は Windows 用の開発サーバー起動スクリプトです（Node.js が必要）。
 
-### 単一 HTML ファイルとして使う
+---
 
-```bash
-npm run build
-```
+## For users (English)
 
-`dist/index.html` が **1 ファイル完結** のアプリとして生成されます。サーバー不要でダブルクリックして開くだけで動作します（Chrome / Edge 推奨）。
+No Node.js or npm is needed to *use* the app; everything is built into a single file, `dist/index.html`.
+
+- **GitHub Pages**: open `https://<user>.github.io/BlockIllustrator/` (the maintainer enables it once under Settings → Pages → Source: GitHub Actions).
+- **Open the file**: download `dist/index.html` (Raw) and double-click it in Chrome or Edge.
+- **Local server**: download the repository as a ZIP and run `serve.cmd` (Windows, PowerShell only) or `./serve.sh` (macOS / Linux, needs python or node). It opens `http://localhost:8000/`.
+
+Diagrams are saved as `.bd` text files on your own computer; nothing is uploaded. Chrome / Edge are recommended (Firefox / Safari fall back to downloads instead of in-place saving and cannot copy PNG to the clipboard). Switch the UI language with the 🌐 selector (日本語 / English / 繁體中文).
 
 ## 主な機能
 

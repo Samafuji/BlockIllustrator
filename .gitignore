@@ -1,3 +1,9 @@
 node_modules
-dist
 .vite
+# keep the single-file build so people can download it without Node.js
+dist/*
+!dist/index.html
+# editor / local tool settings
+.claude/
+.DS_Store
+Thumbs.db

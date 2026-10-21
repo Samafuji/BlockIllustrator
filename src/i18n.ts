@@ -89,6 +89,8 @@ const D: Record<string, [string, string]> = {
   '全体表示': ['Fit to view', '顯示全部'],
   '言語': ['Language', '語言'],
   'エクスポート': ['Export', '匯出'],
+  '背景を透明にする': ['Transparent background', '透明背景'],
+  'OFF のときは白背景で出力します。設定はコードの background に保存されます': ['When off, exports use a white background. Stored as `background` in the code', '關閉時以白色背景輸出。設定會儲存在程式碼的 background'],
   'SVG をダウンロード': ['Download SVG', '下載 SVG'],
   'PNG をダウンロード': ['Download PNG', '下載 PNG'],
   '高解像度': ['high resolution', '高解析度'],

@@ -70,6 +70,7 @@ export function Toolbar() {
   const followEdges = useStore((s) => s.followEdges);
   const hasSel = useStore((s) => s.selection.nodes.length + s.selection.edges.length > 0);
   const selCount = useStore((s) => s.selection.nodes.length);
+  const transparentBg = useStore((s) => s.diagram.style.background === 'transparent' || s.diagram.style.background === 'none');
   const st = useStore.getState;
 
   return (
@@ -185,6 +186,14 @@ export function Toolbar() {
         </select>
       </label>
       <Menu label={'📤 ' + t('エクスポート')} right>
+        <button
+          className="menu-item"
+          onClick={() => st().updateStyle({ background: transparentBg ? '#ffffff' : 'transparent' })}
+          title={t('OFF のときは白背景で出力します。設定はコードの background に保存されます')}
+        >
+          <Check on={transparentBg} /> {t('背景を透明にする')}
+        </button>
+        <div className="menu-sep" />
         <button className="menu-item" onClick={exportActions.svg}>
           {t('SVG をダウンロード')}
         </button>

@@ -751,6 +751,14 @@ function StylePanel() {
         onCommit={(v) => upd({ junctionStyle: v })}
       />
       <h3>{t('キャンバス / 出力')}</h3>
+      <label className="check" title={t('OFF のときは白背景で出力します。設定はコードの background に保存されます')}>
+        <input
+          type="checkbox"
+          checked={style.background === 'transparent' || style.background === 'none'}
+          onChange={(e) => upd({ background: e.target.checked ? 'transparent' : '#ffffff' })}
+        />
+        {t('背景を透明にする')}
+      </label>
       <ColorField
         label={t('背景')}
         value={style.background === 'transparent' ? undefined : style.background}
