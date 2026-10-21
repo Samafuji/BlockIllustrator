@@ -37,7 +37,7 @@ npm run dev      # http://localhost:5173
 npm run build    # dist/index.html を再生成（1 ファイル完結）
 ```
 
-`start.cmd` は Windows 用の開発サーバー起動スクリプトです（Node.js が必要）。
+
 
 ---
 

@@ -7,3 +7,5 @@ dist/*
 .claude/
 .DS_Store
 Thumbs.db
+# local developer helper (not distributed)
+start.cmd
