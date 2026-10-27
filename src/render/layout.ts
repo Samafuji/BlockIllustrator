@@ -35,8 +35,8 @@ export function nodeLabelText(n: DNode, s: DStyle): string {
   return n.label;
 }
 
-/** Where a node's label is drawn: inside the shape, or as a caption under an image. */
-export function nodeLabelPos(box: Box, lay: LabelLayout, s: DStyle): Point {
+/** Where a node's label is drawn: inside the shape, or as a caption under an image (before any manual offset). */
+export function nodeLabelBasePos(box: Box, lay: LabelLayout, s: DStyle): Point {
   const n = box.node;
   const rs = resolveNode(n, s);
   const gap = rs.fontSize * 0.35;
@@ -53,6 +53,13 @@ export function nodeLabelPos(box: Box, lay: LabelLayout, s: DStyle): Point {
       if (n.type === 'gain') return { x: box.cx + (n.flip ? 1 : -1) * box.w * 0.12, y: box.cy };
       return { x: box.cx, y: box.cy };
   }
+}
+
+/** Final label position: the default placement plus the node's manual `offset`. */
+export function nodeLabelPos(box: Box, lay: LabelLayout, s: DStyle): Point {
+  const base = nodeLabelBasePos(box, lay, s);
+  const off = box.node.labelOffset;
+  return off ? { x: base.x + off.x, y: base.y + off.y } : base;
 }
 
 export function layoutDiagram(d: Diagram): DiagramLayout {

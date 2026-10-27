@@ -85,6 +85,7 @@ width 2            枠線の太さ
 radius 8           角丸半径（block / rounded）
 dashed | dotted    枠線を破線 / 点線に（fill none と組み合わせるとグループ枠になる）
 flip               gain を左向きに
+offset (dx, dy)    ラベルを既定位置からずらす（画像のキャプションの微調整など）
 hidden             junction の点を描かない
 plain|cross|sigma  sum の表示
 src host_pc        image の画像（埋め込み画像の名前か URL）

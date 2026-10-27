@@ -67,6 +67,8 @@ export interface DNode {
   src?: string;
   /** label placement (`caption bottom`); images default to bottom, everything else to center */
   labelPos?: LabelPos;
+  /** manual label shift from its default position (`offset (dx, dy)`), set by dragging the label */
+  labelOffset?: Point;
 }
 
 /** Embedded images: name -> data URL (`asset name "data:image/png;base64,..."`). */

@@ -408,6 +408,14 @@ function NodeInspector({ node }: { node: DNode }) {
         ]}
         onCommit={(v) => upd({ labelPos: v === 'default' ? undefined : (v as LabelPos) })}
       />
+      {node.labelOffset && (
+        <div className="btn-row">
+          <button className="btn" onClick={() => upd({ labelOffset: undefined })}>
+            {t('ラベル位置をリセット')}
+          </button>
+        </div>
+      )}
+      <p className="muted">{t('選択中はラベルをドラッグして位置を動かせます（図形はそのまま）。')}</p>
       <h3>{t('位置・サイズ')}</h3>
       <div className="field">
         <label>{t('位置 (x, y)')}</label>

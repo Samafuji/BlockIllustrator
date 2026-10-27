@@ -290,6 +290,23 @@ export function DiagramContent({ layout, mode, selection, hoverNode }: DiagramSv
               {(n.label !== '' || n.type === 'sum') && (
                 <LabelSvg layout={lay} x={lp.x} y={lp.y} color={n.color ?? s.textColor} />
               )}
+              {edit && selected && n.label !== '' && (
+                // drag handle for the label of the selected node (moves the label, not the node)
+                <rect
+                  x={lp.x - lay.w / 2 - 3}
+                  y={lp.y - lay.h / 2 - 2}
+                  width={lay.w + 6}
+                  height={lay.h + 4}
+                  fill="transparent"
+                  stroke={SEL_COLOR}
+                  strokeDasharray="2 2"
+                  strokeWidth={1}
+                  opacity={0.7}
+                  data-node-label={n.id}
+                  style={{ cursor: 'move' }}
+                  vectorEffect="non-scaling-stroke"
+                />
+              )}
             </g>
           );
         })}

@@ -37,6 +37,8 @@ type Interaction =
   /** drag the line body: translate every waypoint (ends stay attached to their blocks) */
   | { kind: 'edgeMove'; edgeId: string; start: Point; moved: boolean; bake: Bake }
   | { kind: 'label'; edgeId: string; mid: Point; moved: boolean }
+  /** drag the label of a selected node: changes its `offset` */
+  | { kind: 'nodeLabel'; id: string; start: Point; orig: Point; moved: boolean }
   | {
       kind: 'connect';
       /** fixed node (source for a new edge; the untouched end when reconnecting) */
@@ -440,6 +442,17 @@ export function Canvas() {
       return;
     }
 
+    const nodeLabelEl = target.closest('[data-node-label]') as HTMLElement | null;
+    if (nodeLabelEl) {
+      const id = nodeLabelEl.dataset.nodeLabel!;
+      const n = st.diagram.nodes.find((x) => x.id === id);
+      if (n) {
+        inter.current = { kind: 'nodeLabel', id, start: world, orig: n.labelOffset ?? { x: 0, y: 0 }, moved: false };
+        svg.setPointerCapture(e.pointerId);
+      }
+      return;
+    }
+
     const labelEl = target.closest('[data-edge-label]') as HTMLElement | null;
     if (labelEl) {
       const edgeId = labelEl.dataset.edgeLabel!;
@@ -657,6 +670,18 @@ export function Canvas() {
         });
         break;
       }
+      case 'nodeLabel': {
+        const dx = world.x - it.start.x;
+        const dy = world.y - it.start.y;
+        if (!it.moved && Math.hypot(dx, dy) * st.view.zoom < 3) return;
+        it.moved = true;
+        const off = { x: Math.round(it.orig.x + dx), y: Math.round(it.orig.y + dy) };
+        st.liveUpdate((d) => {
+          const n = d.nodes.find((x) => x.id === it.id);
+          if (n) n.labelOffset = off;
+        });
+        break;
+      }
       case 'label': {
         it.moved = true;
         const off = { x: Math.round(world.x - it.mid.x), y: Math.round(world.y - it.mid.y) };
@@ -726,6 +751,7 @@ export function Canvas() {
       case 'segment':
       case 'edgeMove':
       case 'label':
+      case 'nodeLabel':
         if (it.moved) st.commit();
         break;
       case 'connect': {

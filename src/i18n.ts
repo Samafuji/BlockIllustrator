@@ -209,6 +209,7 @@ const D: Record<string, [string, string]> = {
   '⇄ 向きを反転': ['⇄ Reverse direction', '⇄ 反轉方向'],
   '例: $u(t)$': ['e.g. $u(t)$', '例：$u(t)$'],
   'ラベル位置をリセット': ['Reset label position', '重設標籤位置'],
+  '選択中はラベルをドラッグして位置を動かせます（図形はそのまま）。': ['While selected, drag the label to move it (the shape stays put).', '選取時可拖曳標籤移動位置 (圖形不動)。'],
   '符号 (sign)': ['Sign', '正負號 (sign)'],
   '+ / - (加算点用)': ['+ / - (for sum junctions)', '+ / - (加法點用)'],
   '線': ['Line', '線'],

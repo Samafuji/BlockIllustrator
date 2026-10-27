@@ -1,4 +1,4 @@
-import { DEFAULT_STYLE, DEdge, DNode, DStyle, Diagram, NODE_TYPES, NodeType, STYLE_KEYS, StyleKey, TypeDefaults } from '../model/types';
+import { DEFAULT_STYLE, DEdge, DNode, DStyle, Diagram, NODE_TYPES, NodeType, STYLE_KEYS, StyleKey, TypeDefaults, Point } from '../model/types';
 import { ParseResult, Span } from './parser';
 
 // ---------------------------------------------------------------------------
@@ -35,7 +35,7 @@ function colorTok(c: string): string {
 }
 
 /** Attribute text shared by node lines and per-type defaults in the style block. */
-export function attrParts(o: TypeDefaults & { flip?: boolean; hidden?: boolean }, type: NodeType): string[] {
+export function attrParts(o: TypeDefaults & { flip?: boolean; hidden?: boolean; labelOffset?: Point }, type: NodeType): string[] {
   const parts: string[] = [];
   if (o.w !== undefined || o.h !== undefined) {
     if (type === 'sum' || type === 'junction') {
@@ -57,6 +57,7 @@ export function attrParts(o: TypeDefaults & { flip?: boolean; hidden?: boolean }
   if (o.sumStyle !== undefined) parts.push(o.sumStyle);
   if (o.dash !== undefined && o.dash !== 'solid') parts.push(o.dash);
   if (o.labelPos !== undefined) parts.push(`caption ${o.labelPos}`);
+  if (o.labelOffset) parts.push(`offset (${fmtNum(o.labelOffset.x)}, ${fmtNum(o.labelOffset.y)})`);
   return parts;
 }
 

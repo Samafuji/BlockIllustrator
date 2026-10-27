@@ -409,6 +409,7 @@ export function parse(code: string): ParseResult {
 
 /** Attribute target: a node, or a per-type defaults object inside the style block. */
 interface AttrTarget extends TypeDefaults {
+  labelOffset?: { x: number; y: number };
   x?: number;
   y?: number;
   label?: string;
@@ -500,6 +501,11 @@ function parseAttrs(o: AttrTarget, c: Cursor, opts: { allowPosition: boolean; st
       case 'dotted':
       case 'solid':
         o.dash = key;
+        break;
+      case 'offset':
+      case 'labeloffset':
+        nodeOnly(t);
+        o.labelOffset = c.readPoint();
         break;
       case 'caption':
       case 'labelpos':
