@@ -159,7 +159,7 @@ const D: Record<string, [string, string]> = {
   '円 + Σ': ['Circle + Σ', '圓形 + Σ'],
   '文字色': ['Text color', '文字顏色'],
   '文字サイズ': ['Font size', '文字大小'],
-  '全体の文字サイズを変えると、種類ごとの既定値や個別指定の文字サイズも同じ差分で変わります。': ['Changing the global font size also shifts per-type defaults and individual font sizes by the same amount.', '變更整體文字大小時，各類型預設值與個別指定的文字大小也會以相同差值改變。'],
+  '既定値のままの文字（ブロック・テキスト・線ラベル）はすべてこのサイズになります。個別に指定した文字サイズはそのままです。': ['All text still at its default (blocks, text nodes, line labels) takes this size. Individually set font sizes are left as they are.', '所有仍為預設值的文字 (方塊、文字節點、線段標籤) 都會變成此大小；個別指定的文字大小維持不變。'],
   '種類ごとの既定値・ノード・線ラベルに付いた個別の文字サイズをすべて外し、全体の文字サイズに統一します': ['Remove every explicit font size (type defaults, nodes, line labels) so all text uses the global size', '移除所有個別指定的文字大小 (類型預設值、節點、線段標籤)，統一為整體文字大小'],
   '文字サイズを全体の値に統一': ['Unify all font sizes', '統一所有文字大小'],
   'この種類の図形に付いている個別のサイズ・色などを外し、すべて既定値に揃えます': ['Remove per-shape size/color overrides of this type so all follow the defaults', '移除此類圖形的個別大小、顏色設定，全部改用預設值'],

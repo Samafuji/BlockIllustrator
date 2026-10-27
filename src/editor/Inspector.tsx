@@ -766,27 +766,21 @@ function StylePanel() {
         value={style.fontSize}
         min={1}
         onCommit={(v) => {
-          // Shift every explicit font size (type defaults, nodes, line labels) by the same
-          // amount so that one change resizes all text while keeping relative differences.
+          // All text that is still "at default" follows this value: per-type font-size
+          // defaults are dropped so blocks, text nodes and line labels end up the same size.
+          // Font sizes set on individual nodes / lines are left untouched.
           const next = v ?? DEFAULT_STYLE.fontSize;
-          const delta = next - style.fontSize;
           useStore.getState().commit(
             (d) => {
               d.style.fontSize = next;
-              if (delta === 0) return;
-              for (const ty of Object.keys(d.style.defaults) as NodeType[]) {
-                const td = d.style.defaults[ty];
-                if (td?.fontSize !== undefined) td.fontSize = Math.max(1, td.fontSize + delta);
-              }
-              for (const n of d.nodes) if (n.fontSize !== undefined) n.fontSize = Math.max(1, n.fontSize + delta);
-              for (const e of d.edges) if (e.fontSize !== undefined) e.fontSize = Math.max(1, e.fontSize + delta);
+              for (const ty of Object.keys(d.style.defaults) as NodeType[]) delete d.style.defaults[ty]?.fontSize;
             },
             { coalesce: 'style:fontSize' },
           );
         }}
       />
       <p className="muted" style={{ marginTop: -2 }}>
-        {t('全体の文字サイズを変えると、種類ごとの既定値や個別指定の文字サイズも同じ差分で変わります。')}
+        {t('既定値のままの文字（ブロック・テキスト・線ラベル）はすべてこのサイズになります。個別に指定した文字サイズはそのままです。')}
       </p>
       <div className="btn-row">
         <button
