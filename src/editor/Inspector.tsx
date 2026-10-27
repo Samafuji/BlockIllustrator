@@ -761,7 +761,48 @@ function StylePanel() {
         }}
       />
       <TextField label={t('フォント指定')} value={style.font} mono onCommit={(v) => upd({ font: v || DEFAULT_STYLE.font })} />
-      <NumField label={t('文字サイズ')} value={style.fontSize} min={1} onCommit={(v) => upd({ fontSize: v ?? DEFAULT_STYLE.fontSize })} />
+      <NumField
+        label={t('文字サイズ')}
+        value={style.fontSize}
+        min={1}
+        onCommit={(v) => {
+          // Shift every explicit font size (type defaults, nodes, line labels) by the same
+          // amount so that one change resizes all text while keeping relative differences.
+          const next = v ?? DEFAULT_STYLE.fontSize;
+          const delta = next - style.fontSize;
+          useStore.getState().commit(
+            (d) => {
+              d.style.fontSize = next;
+              if (delta === 0) return;
+              for (const ty of Object.keys(d.style.defaults) as NodeType[]) {
+                const td = d.style.defaults[ty];
+                if (td?.fontSize !== undefined) td.fontSize = Math.max(1, td.fontSize + delta);
+              }
+              for (const n of d.nodes) if (n.fontSize !== undefined) n.fontSize = Math.max(1, n.fontSize + delta);
+              for (const e of d.edges) if (e.fontSize !== undefined) e.fontSize = Math.max(1, e.fontSize + delta);
+            },
+            { coalesce: 'style:fontSize' },
+          );
+        }}
+      />
+      <p className="muted" style={{ marginTop: -2 }}>
+        {t('全体の文字サイズを変えると、種類ごとの既定値や個別指定の文字サイズも同じ差分で変わります。')}
+      </p>
+      <div className="btn-row">
+        <button
+          className="btn"
+          title={t('種類ごとの既定値・ノード・線ラベルに付いた個別の文字サイズをすべて外し、全体の文字サイズに統一します')}
+          onClick={() =>
+            useStore.getState().commit((d) => {
+              for (const ty of Object.keys(d.style.defaults) as NodeType[]) delete d.style.defaults[ty]?.fontSize;
+              for (const n of d.nodes) delete n.fontSize;
+              for (const e of d.edges) delete e.fontSize;
+            })
+          }
+        >
+          {t('文字サイズを全体の値に統一')}
+        </button>
+      </div>
       <ColorField label={t('文字色')} value={style.textColor} onLive={(v) => upd({ textColor: v }, true)} onCommit={(v) => upd({ textColor: v ?? DEFAULT_STYLE.textColor })} />
       <h3>{t('線・矢印')}</h3>
       <NumField label={t('線の太さ')} value={style.lineWidth} step={0.5} min={0} onCommit={(v) => upd({ lineWidth: v ?? DEFAULT_STYLE.lineWidth })} />
