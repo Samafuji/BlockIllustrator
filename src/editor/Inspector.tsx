@@ -6,6 +6,8 @@ import {
   DEdge,
   DNode,
   DStyle,
+  LABEL_POSITIONS,
+  LabelPos,
   NODE_TYPES,
   NodeType,
   SIDES,
@@ -16,6 +18,7 @@ import {
 } from '../model/types';
 import { AlignMode, useStore } from '../store/useStore';
 import { layoutDiagram } from '../render/layout';
+import { fitNodeToImage, replaceNodeImage } from '../io/images';
 
 // ---------------------------------------------------------------- fields
 
@@ -290,9 +293,11 @@ const TYPE_LABELS: Record<NodeType, string> = {
   sum: '加算点',
   junction: '分岐点',
   text: 'テキスト',
+  image: '画像',
 };
 
 const SIDE_LABELS: Record<Side, string> = { left: '左', right: '右', top: '上', bottom: '下' };
+export const LABEL_POS_LABELS: Record<LabelPos, string> = { center: '中央 (図形の中)', top: '上', bottom: '下', left: '左', right: '右' };
 const ARROW_LABELS: Record<string, string> = {
   triangle: '三角 (塗り)',
   open: '開いた矢印',
@@ -325,7 +330,36 @@ const HELP_ITEMS: string[] = [
   'Delete 削除、Ctrl+D 複製、Ctrl+Z 元に戻す、矢印キーで微調整',
   'Ctrl+C / Ctrl+X / Ctrl+V でコピー・切り取り・貼り付け（別の図やテキストエディタにも貼れます）',
   'ラベル内の $...$ は LaTeX 数式（例: $G(s)=\\frac{1}{s+1}$）',
+  '画像: パレットの「画像」、キャンバスへのドロップ、Ctrl+V（スクリーンショット）で追加。ラベルは画像の下にキャプションとして表示',
 ];
+
+function ImageSection({ node }: { node: DNode }) {
+  const t = useT();
+  const assets = useStore((s) => s.diagram.assets);
+  const href = node.src ? assets[node.src] ?? node.src : undefined;
+  const embedded = !!node.src && assets[node.src] !== undefined;
+  const kb = embedded ? Math.round(((assets[node.src!].length * 3) / 4) / 1024) : 0;
+  return (
+    <>
+      <h3>{t('画像')}</h3>
+      <div className="image-preview">
+        {href ? <img src={href} alt="" /> : <span className="muted">{t('画像がありません')}</span>}
+      </div>
+      <div className="muted" style={{ marginBottom: 4 }}>
+        {node.src ? (embedded ? t('埋め込み: {name} (約 {kb} KB)', { name: node.src, kb }) : t('URL: {v}', { v: node.src })) : t('(未設定)')}
+      </div>
+      <div className="btn-row">
+        <button className="btn" onClick={() => void replaceNodeImage(node.id)}>
+          {t('画像を変更…')}
+        </button>
+        <button className="btn" onClick={() => void fitNodeToImage(node.id)} disabled={!href} title={t('幅はそのままで、高さを画像の縦横比に合わせます')}>
+          {t('縦横比を元に戻す')}
+        </button>
+      </div>
+      <p className="muted">{t('角のハンドルは縦横比を保ってサイズ変更します（Shift で自由に変形）。ラベルは画像の下にキャプションとして表示されます。')}</p>
+    </>
+  );
+}
 
 // ---------------------------------------------------------------- node
 
@@ -357,12 +391,22 @@ function NodeInspector({ node }: { node: DNode }) {
         onCommit={(v) => upd({ type: v })}
       />
       <TextField
-        label={t('ラベル')}
+        label={node.type === 'image' ? t('キャプション') : t('ラベル')}
         value={node.label}
         multiline
         focusKey={focusReq}
         placeholder={t('テキスト。数式は $...$、改行可 (Ctrl+Enter で確定)')}
         onCommit={(v) => upd({ label: v })}
+      />
+      {node.type === 'image' && <ImageSection node={node} />}
+      <SelectField
+        label={node.type === 'image' ? t('キャプションの位置') : t('ラベルの位置')}
+        value={node.labelPos ?? 'default'}
+        options={[
+          { value: 'default', label: t('既定 ({v})', { v: t(LABEL_POS_LABELS[rs.labelPos]) }) },
+          ...LABEL_POSITIONS.map((p) => ({ value: p, label: t(LABEL_POS_LABELS[p]) })),
+        ]}
+        onCommit={(v) => upd({ labelPos: v === 'default' ? undefined : (v as LabelPos) })}
       />
       <h3>{t('位置・サイズ')}</h3>
       <div className="field">
@@ -383,7 +427,7 @@ function NodeInspector({ node }: { node: DNode }) {
       ) : (
         <NumField label={t('直径')} value={node.w} placeholder={String(size.w)} onCommit={(v) => upd({ w: v, h: v })} />
       )}
-      {(node.type === 'block' || node.type === 'rounded') && (
+      {(node.type === 'block' || node.type === 'rounded' || node.type === 'image') && (
         <NumField label={t('角丸半径')} value={node.radius} placeholder={String(rs.radius)} onCommit={(v) => upd({ radius: v })} />
       )}
       {node.type === 'gain' && (

@@ -70,6 +70,7 @@ style {
 | `sum` | 加算点（円） | 符号は接続線側の `sign` で指定。`sigma` で Σ、`cross` で × を表示 |
 | `junction` | 分岐点（黒丸） | `hidden` で点なし。分岐点に入る線には矢印が付かない |
 | `text` | 枠なしテキスト | 入出力信号名 (`$r(t)$` など) に使う |
+| `image` | 画像（写真・アイコン） | `src <名前>` で埋め込み画像を参照。ラベルは画像の下のキャプションになる。画像データは `asset <名前> "data:image/png;base64,..."` という行で与える（AI が生成するときは `src` の名前だけ書き、ユーザーが後から GUI で画像を差し替える） |
 
 ### ノード属性（すべて省略可、順不同）
 
@@ -86,6 +87,8 @@ dashed | dotted    枠線を破線 / 点線に（fill none と組み合わせる
 flip               gain を左向きに
 hidden             junction の点を描かない
 plain|cross|sigma  sum の表示
+src host_pc        image の画像（埋め込み画像の名前か URL）
+caption right      ラベルの位置: center | top | bottom | left | right（image は既定で bottom、他は center）
 ```
 
 ## 5. 接続線

@@ -1,7 +1,8 @@
 import { create } from 'zustand';
-import { edgeToLine, nodeToLine, syncCode } from '../dsl/generator';
+import { assetsToLines, edgeToLine, nodeToLine, syncCode } from '../dsl/generator';
 import { ParseResult, parse } from '../dsl/parser';
 import {
+  Assets,
   DEdge,
   DNode,
   Diagram,
@@ -10,6 +11,7 @@ import {
   TYPE_PREFIX,
   cloneDiagram,
   nextId,
+  usedAssets,
 } from '../model/types';
 import { EXAMPLES } from '../examples';
 import { followEdgesAfterMove, polylineLength, polylineMid } from '../geometry/geometry';
@@ -27,12 +29,20 @@ export interface ViewState {
 }
 
 const AUTOSAVE_KEY = 'blockillustrator.autosave.v1';
+const ASSETS_KEY = 'blockillustrator.autosave.assets.v1';
 const MAX_HISTORY = 200;
 
 export interface StoreState {
   code: string;
   parse: ParseResult;
   diagram: Diagram;
+  /**
+   * Embedded images (name -> data URL). Kept apart from `code` so the editor and the
+   * undo history stay small; they are appended as `asset` lines when saving / copying.
+   */
+  assets: Assets;
+  /** shown in the status bar when the browser autosave could not store the images */
+  autosaveWarning: string | null;
   /** incremented whenever `code` was changed by something other than the editor */
   codeVersion: number;
   selection: SelectionState;
@@ -59,6 +69,12 @@ export interface StoreState {
   setCodeFromEditor: (code: string) => void;
   loadCode: (code: string, file?: { name: string | null; handle: FileSystemFileHandle | null }) => void;
   markSaved: (name: string, handle: FileSystemFileHandle | null) => void;
+  /** full .bd text: the code plus the embedded images that are in use */
+  serialize: () => string;
+  /** embed an image; returns the name actually used (identical data reuses the existing name) */
+  addAsset: (name: string, data: string) => string;
+  /** add an image node showing an asset (size in diagram units) */
+  addImageNode: (src: string, at: { x: number; y: number }, size: { w: number; h: number }) => string;
 
   // ---- GUI side
   liveUpdate: (fn: (d: Diagram) => void) => void;
@@ -113,6 +129,47 @@ function initialCode(): string {
   return EXAMPLES[0].code;
 }
 
+function initialAssets(): Assets {
+  try {
+    const saved = localStorage.getItem(ASSETS_KEY);
+    if (saved) {
+      const v = JSON.parse(saved);
+      if (v && typeof v === 'object') return v as Assets;
+    }
+  } catch {
+    /* ignore */
+  }
+  return {};
+}
+
+/** Parse the code and merge the separately stored images into the diagram. */
+function parseWith(code: string, assets: Assets): ParseResult {
+  const p = parse(code);
+  p.diagram.assets = { ...p.diagram.assets, ...assets };
+  return p;
+}
+
+const ASSET_MARKER_RE = /^\s*\/\/\s*-+\s*images\s*-+\s*$/i;
+
+/** Split `asset` lines (and their "// --- images ---" marker) off a .bd text. */
+export function splitAssets(text: string): { code: string; assets: Assets } {
+  const p = parse(text);
+  const drop = new Set<number>();
+  for (const span of Object.values(p.assetSpans)) for (let i = span.start; i <= span.end; i++) drop.add(i);
+  if (drop.size === 0) return { code: text, assets: {} };
+  const lines = text.split('\n');
+  const kept = lines.filter((l, i) => !drop.has(i) && !ASSET_MARKER_RE.test(l));
+  // collapse the blank lines left behind at the end
+  while (kept.length > 1 && kept[kept.length - 1].trim() === '' && kept[kept.length - 2].trim() === '') kept.pop();
+  return { code: kept.join('\n'), assets: p.diagram.assets };
+}
+
+function sanitizeAssetName(name: string): string {
+  let s = name.replace(/[^A-Za-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
+  if (!s || !/^[A-Za-z_]/.test(s)) s = 'img' + (s ? '_' + s : '');
+  return s;
+}
+
 function readBool(key: string, def: boolean): boolean {
   try {
     const v = localStorage.getItem(key);
@@ -123,6 +180,7 @@ function readBool(key: string, def: boolean): boolean {
 }
 
 let autosaveTimer: number | undefined;
+let assetsTimer: number | undefined;
 let lastCommit: { key: string | null; time: number } = { key: null, time: 0 };
 let lastCopied: { text: string; pastes: number } | null = null;
 function scheduleAutosave(code: string) {
@@ -138,7 +196,21 @@ function scheduleAutosave(code: string) {
 
 export const useStore = create<StoreState>((set, get) => {
   const code0 = initialCode();
-  const parse0 = parse(code0);
+  const assets0 = initialAssets();
+  const parse0 = parseWith(code0, assets0);
+
+  function scheduleAssetsAutosave(assets: Assets) {
+    if (assetsTimer) window.clearTimeout(assetsTimer);
+    assetsTimer = window.setTimeout(() => {
+      try {
+        if (Object.keys(assets).length === 0) localStorage.removeItem(ASSETS_KEY);
+        else localStorage.setItem(ASSETS_KEY, JSON.stringify(assets));
+        if (get().autosaveWarning) set({ autosaveWarning: null });
+      } catch {
+        set({ autosaveWarning: '画像が大きいためブラウザには自動保存できません。ファイルに保存してください (Ctrl+S)' });
+      }
+    }, 500);
+  }
 
   function pushHistory(prevCode: string) {
     const past = [...get().past, prevCode];
@@ -148,7 +220,7 @@ export const useStore = create<StoreState>((set, get) => {
 
   function applyCode(newCode: string, opts: { history?: boolean; fromEditor?: boolean; resetHistory?: boolean } = {}) {
     const st = get();
-    const p = parse(newCode);
+    const p = parseWith(newCode, st.assets);
     scheduleAutosave(newCode);
     set({
       code: newCode,
@@ -165,6 +237,8 @@ export const useStore = create<StoreState>((set, get) => {
     code: code0,
     parse: parse0,
     diagram: parse0.diagram,
+    assets: assets0,
+    autosaveWarning: null,
     codeVersion: 0,
     selection: { nodes: [], edges: [] },
     hoverNode: null,
@@ -196,7 +270,10 @@ export const useStore = create<StoreState>((set, get) => {
       if (nodes.length !== sel.nodes.length || edges.length !== sel.edges.length) set({ selection: { nodes, edges } });
     },
 
-    loadCode(code, file) {
+    loadCode(text, file) {
+      const { code, assets } = splitAssets(text);
+      set({ assets });
+      scheduleAssetsAutosave(assets);
       applyCode(code, { resetHistory: true });
       set({
         selection: { nodes: [], edges: [] },
@@ -204,6 +281,43 @@ export const useStore = create<StoreState>((set, get) => {
         fileHandle: file?.handle ?? null,
         dirty: false,
       });
+    },
+
+    serialize() {
+      const st = get();
+      const inCode = new Set(Object.keys(st.parse.assetSpans));
+      const names = [...usedAssets(st.diagram)].filter((n) => !inCode.has(n));
+      let out = st.code.replace(/\s+$/, '') + '\n';
+      if (names.length) out += '\n// --- images ---\n' + assetsToLines(st.diagram.assets, names).join('\n') + '\n';
+      return out;
+    },
+
+    addAsset(name, data) {
+      const st = get();
+      const all = st.diagram.assets;
+      for (const [k, v] of Object.entries(all)) if (v === data) return k; // same picture: reuse
+      let n = sanitizeAssetName(name);
+      if (all[n] !== undefined) {
+        const base = n.replace(/_?\d+$/, '') || 'img';
+        let i = 2;
+        while (all[`${base}_${i}`] !== undefined) i++;
+        n = `${base}_${i}`;
+      }
+      const assets = { ...st.assets, [n]: data };
+      const p = parseWith(st.code, assets);
+      set({ assets, parse: p, diagram: p.diagram, dirty: true });
+      scheduleAssetsAutosave(assets);
+      return n;
+    },
+
+    addImageNode(src, at, size) {
+      const d = get().diagram;
+      const id = nextId(d, TYPE_PREFIX.image);
+      get().commit((dd) => {
+        dd.nodes.push({ id, type: 'image', label: '', x: at.x, y: at.y, w: size.w, h: size.h, src });
+      });
+      set({ selection: { nodes: [id], edges: [] } });
+      return id;
     },
 
     markSaved(name, handle) {
@@ -242,7 +356,7 @@ export const useStore = create<StoreState>((set, get) => {
       const st = get();
       if (st.past.length === 0) return;
       const prev = st.past[st.past.length - 1];
-      const p = parse(prev);
+      const p = parseWith(prev, st.assets);
       scheduleAutosave(prev);
       set({
         code: prev,
@@ -260,7 +374,7 @@ export const useStore = create<StoreState>((set, get) => {
       const st = get();
       if (st.future.length === 0) return;
       const next = st.future[0];
-      const p = parse(next);
+      const p = parseWith(next, st.assets);
       scheduleAutosave(next);
       set({
         code: next,
@@ -441,6 +555,10 @@ export const useStore = create<StoreState>((set, get) => {
       const lines: string[] = [];
       for (const n of st.diagram.nodes) if (ids.has(n.id)) lines.push(nodeToLine(n));
       for (const e of st.diagram.edges) if (ids.has(e.from) && ids.has(e.to)) lines.push(edgeToLine(e));
+      // embedded images travel with their nodes so the text is self-contained
+      const used = new Set<string>();
+      for (const n of st.diagram.nodes) if (ids.has(n.id) && n.type === 'image' && n.src && st.diagram.assets[n.src] !== undefined) used.add(n.src);
+      lines.push(...assetsToLines(st.diagram.assets, used));
       const text = lines.join('\n') + '\n';
       lastCopied = { text, pastes: 0 };
       return text;
@@ -457,6 +575,9 @@ export const useStore = create<StoreState>((set, get) => {
       const off = { x: step * k, y: step * k };
       const idMap: Record<string, string> = {};
       const newIds: string[] = [];
+      // pasted images: merge into the asset store (identical data keeps its name, clashes are renamed)
+      const assetMap: Record<string, string> = {};
+      for (const [name, data] of Object.entries(parsed.diagram.assets)) assetMap[name] = get().addAsset(name, data);
       get().commit((d) => {
         const taken = new Set(d.nodes.map((n) => n.id));
         for (const n of parsed.diagram.nodes) {
@@ -470,7 +591,9 @@ export const useStore = create<StoreState>((set, get) => {
           taken.add(id);
           idMap[n.id] = id;
           newIds.push(id);
-          d.nodes.push({ ...JSON.parse(JSON.stringify(n)), id, x: n.x + off.x, y: n.y + off.y });
+          const copy: DNode = { ...JSON.parse(JSON.stringify(n)), id, x: n.x + off.x, y: n.y + off.y };
+          if (copy.src && assetMap[copy.src]) copy.src = assetMap[copy.src];
+          d.nodes.push(copy);
         }
         let count = d.edges.length;
         for (const e of parsed.diagram.edges) {

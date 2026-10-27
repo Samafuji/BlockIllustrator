@@ -112,7 +112,25 @@ const D: Record<string, [string, string]> = {
   '円': ['Circle', '圓'],
   'ひし形': ['Diamond', '菱形'],
   'テキスト': ['Text', '文字'],
+  '画像': ['Image', '圖片'],
   '{label}を追加': ['Add {label}', '新增{label}'],
+  '画像ファイルを選んで追加（キャンバスへのドロップ / Ctrl+V でも追加できます）': ['Choose image files to add (dropping them on the canvas or Ctrl+V also works)', '選擇圖片檔案加入 (也可拖放到畫布或 Ctrl+V)'],
+  'キャプション': ['Caption', '圖說'],
+  'キャプションの位置': ['Caption position', '圖說位置'],
+  'ラベルの位置': ['Label position', '標籤位置'],
+  '中央 (図形の中)': ['Center (inside)', '中央 (圖形內)'],
+  '画像がありません': ['No picture', '沒有圖片'],
+  '埋め込み: {name} (約 {kb} KB)': ['Embedded: {name} (about {kb} KB)', '內嵌：{name} (約 {kb} KB)'],
+  'URL: {v}': ['URL: {v}', 'URL: {v}'],
+  '(未設定)': ['(not set)', '(未設定)'],
+  '画像を変更…': ['Change picture…', '更換圖片…'],
+  '縦横比を元に戻す': ['Restore aspect ratio', '恢復原始比例'],
+  '幅はそのままで、高さを画像の縦横比に合わせます': ['Keeps the width and sets the height from the picture\'s aspect ratio', '保持寬度，依圖片比例調整高度'],
+  '角のハンドルは縦横比を保ってサイズ変更します（Shift で自由に変形）。ラベルは画像の下にキャプションとして表示されます。': ['Corner handles keep the aspect ratio (hold Shift to stretch freely). The label is drawn under the picture as a caption.', '角落控制點會保持比例 (按住 Shift 可自由變形)。標籤會顯示在圖片下方作為圖說。'],
+  '画像: パレットの「画像」、キャンバスへのドロップ、Ctrl+V（スクリーンショット）で追加。ラベルは画像の下にキャプションとして表示': ['Images: add from the palette, by dropping files on the canvas, or Ctrl+V (screenshots). The label becomes a caption under the picture', '圖片：從面板的「圖片」、拖放到畫布或 Ctrl+V (截圖) 加入。標籤顯示在圖片下方作為圖說'],
+  '画像を読み込めませんでした': ['Could not load the image', '無法載入圖片'],
+  '画像ファイルではありません': ['Not an image file', '不是圖片檔案'],
+  '画像が大きいためブラウザには自動保存できません。ファイルに保存してください (Ctrl+S)': ['The pictures are too large for the browser autosave; save to a file (Ctrl+S)', '圖片太大，無法自動儲存在瀏覽器；請儲存成檔案 (Ctrl+S)'],
   '{label}の既定値（サイズ・色・文字）を設定': ['Defaults for {label} (size, colors, text)', '設定{label}的預設值 (大小、顏色、文字)'],
 
   // ---- type defaults panel
@@ -257,7 +275,7 @@ const D: Record<string, [string, string]> = {
   // ---- canvas
   'コードに {n} 件のエラーがあります（該当行は図に反映されません）': ['{n} error(s) in the code (those lines are not drawn)', '程式碼有 {n} 個錯誤 (該行不會顯示在圖中)'],
   '接続モード: 始点のブロックから終点のブロックへドラッグ（ポート○に落とすと辺を固定、Esc / C で終了）': ['Connect mode: drag from the source block to the target block (drop on a port ○ to fix the side; Esc / C to exit)', '連線模式：從起點方塊拖曳到終點方塊 (放到連接埠 ○ 可固定邊；Esc / C 結束)'],
-  'ドラッグ: 移動 ・ ポート○ / 「接続」(C): 線を引く ・ 線をダブルクリック: 分岐点を挿入 ・ 線の端点ドラッグ: つなぎ替え ・ 空白ダブルクリック: ブロック追加': ['Drag: move · Port ○ / Connect (C): draw a line · Double-click a line: insert branch point · Drag a line end: reattach · Double-click empty space: add block', '拖曳：移動 · 連接埠 ○ / 連線 (C)：畫線 · 雙擊線段：插入分支點 · 拖曳線段端點：重新連接 · 雙擊空白處：新增方塊'],
+  'ドラッグ: 移動 ・ ポート○ / 「接続」(C): 線を引く ・ 線をダブルクリック: 分岐点を挿入 ・ 線の端点ドラッグ: つなぎ替え ・ 空白ダブルクリック: ブロック追加 ・ 画像はドロップ / Ctrl+V で追加': ['Drag: move · Port ○ / Connect (C): draw a line · Double-click a line: insert branch point · Drag a line end: reattach · Double-click empty space: add block · Drop / Ctrl+V: add images', '拖曳：移動 · 連接埠 ○ / 連線 (C)：畫線 · 雙擊線段：插入分支點 · 拖曳線段端點：重新連接 · 雙擊空白處：新增方塊 · 拖放 / Ctrl+V：加入圖片'],
   'ドラッグで曲がり角（経由点）を追加（ダブルクリックで分岐点）': ['Drag to add a bend (via point); double-click for a branch point', '拖曳新增轉角 (經由點)；雙擊插入分支點'],
   'ドラッグでこの区間を平行移動（ダブルクリックで分岐点）': ['Drag to move this segment sideways; double-click for a branch point', '拖曳平移此區段；雙擊插入分支點'],
   'ドラッグで曲がり角を移動（ダブルクリックで削除）': ['Drag to move the bend; double-click to remove it', '拖曳移動轉角；雙擊刪除'],
@@ -343,6 +361,11 @@ const D: Record<string, [string, string]> = {
   "sign の値が不正です: '{v}'": ["Invalid sign value: '{v}'", "無效的 sign 值：'{v}'"],
   'via の後に座標 (x, y) が必要です': ['Expected coordinates (x, y) after via', 'via 之後需要座標 (x, y)'],
   '矢印種別': ['an arrow kind', '箭頭類型'],
+  'アセット名': ['an asset name', '資源名稱'],
+  '画像データ (data URL)': ['image data (data URL)', '圖片資料 (data URL)'],
+  'src の後にアセット名か URL が必要です': ['Expected an asset name or URL after src', 'src 之後需要資源名稱或 URL'],
+  'caption の位置 (center|top|bottom|left|right)': ['a caption position (center|top|bottom|left|right)', '圖說位置 (center|top|bottom|left|right)'],
+  'caption は {v} のいずれかです': ['caption must be one of {v}', 'caption 必須是 {v} 之一'],
 };
 
 export function t(ja: string, params?: Record<string, string | number>): string {

@@ -6,7 +6,7 @@ import 'svg2pdf.js';
 import { Diagram } from '../model/types';
 import { ExportSvg, exportSize } from '../render/DiagramSvg';
 import { layoutDiagram } from '../render/layout';
-import { svgToEps } from './eps';
+import { RasterImage, svgToEps } from './eps';
 
 export interface SvgResult {
   svg: string;
@@ -114,10 +114,55 @@ export async function exportPdfFile(diagram: Diagram, name: string) {
   downloadBlob(blob, `${name}.pdf`);
 }
 
-/** EPS (PostScript standard fonts; math is exported as outlines). */
-export function exportEpsFile(diagram: Diagram, name: string) {
+/** Longest side of a raster embedded in EPS (hex data is 6 bytes per pixel in the file). */
+const EPS_IMAGE_SIDE = 1000;
+
+/** Decode every <image> of the SVG into RGB samples (composited on white) for the EPS writer. */
+async function decodeImagesForEps(svg: string): Promise<Map<string, RasterImage>> {
+  const doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
+  const out = new Map<string, RasterImage>();
+  for (const el of Array.from(doc.getElementsByTagName('image'))) {
+    const href = el.getAttribute('href') || el.getAttribute('xlink:href');
+    if (!href || out.has(href)) continue;
+    try {
+      const img = await loadImage(href);
+      const nw = img.naturalWidth || img.width;
+      const nh = img.naturalHeight || img.height;
+      if (!nw || !nh) continue;
+      const k = Math.min(1, EPS_IMAGE_SIDE / Math.max(nw, nh));
+      const w = Math.max(1, Math.round(nw * k));
+      const h = Math.max(1, Math.round(nh * k));
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d')!;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(img, 0, 0, w, h);
+      const px = ctx.getImageData(0, 0, w, h).data;
+      const rgb = new Uint8Array(w * h * 3);
+      for (let i = 0, j = 0; i < px.length; i += 4, j += 3) {
+        rgb[j] = px[i];
+        rgb[j + 1] = px[i + 1];
+        rgb[j + 2] = px[i + 2];
+      }
+      out.set(href, { w, h, rgb });
+    } catch {
+      /* unreadable picture: the EPS simply omits it */
+    }
+  }
+  return out;
+}
+
+/** EPS (PostScript standard fonts; math is exported as outlines; pictures as RGB rasters). */
+export async function renderEps(diagram: Diagram): Promise<string> {
   const { svg, w, h } = buildSvg(diagram);
-  const eps = svgToEps(svg, w, h);
+  const images = await decodeImagesForEps(svg);
+  return svgToEps(svg, w, h, images);
+}
+
+export async function exportEpsFile(diagram: Diagram, name: string) {
+  const eps = await renderEps(diagram);
   downloadBlob(new Blob([eps], { type: 'application/postscript' }), `${name}.eps`);
 }
 

@@ -56,15 +56,33 @@ export function attrParts(o: TypeDefaults & { flip?: boolean; hidden?: boolean }
   else if (o.hidden === false) parts.push('visible');
   if (o.sumStyle !== undefined) parts.push(o.sumStyle);
   if (o.dash !== undefined && o.dash !== 'solid') parts.push(o.dash);
+  if (o.labelPos !== undefined) parts.push(`caption ${o.labelPos}`);
   return parts;
+}
+
+function srcTok(src: string): string {
+  return /^[A-Za-z_][A-Za-z0-9_\-]*$/.test(src) ? src : quote(src);
 }
 
 export function nodeToLine(n: DNode): string {
   const parts: string[] = [n.type, n.id];
   if (n.label !== '') parts.push(quote(n.label));
   parts.push(`at (${fmtNum(n.x)}, ${fmtNum(n.y)})`);
+  if (n.src !== undefined && n.src !== '') parts.push(`src ${srcTok(n.src)}`);
   parts.push(...attrParts(n, n.type));
   return parts.join(' ');
+}
+
+export function assetToLine(name: string, data: string): string {
+  return `asset ${name} ${quote(data)}`;
+}
+
+/** Text of the embedded images (appended to the code when saving / copying). */
+export function assetsToLines(assets: Record<string, string>, names?: Iterable<string>): string[] {
+  const keys = names ? [...names] : Object.keys(assets);
+  const out: string[] = [];
+  for (const k of keys) if (assets[k] !== undefined) out.push(assetToLine(k, assets[k]));
+  return out;
 }
 
 export function typeDefaultsToText(t: NodeType, d: TypeDefaults | undefined): string | null {
@@ -128,6 +146,12 @@ export function generate(d: Diagram): string {
   out.push('// --- connections ---');
   for (const e of d.edges) out.push(edgeToLine(e));
   out.push('');
+  const assets = assetsToLines(d.assets);
+  if (assets.length) {
+    out.push('// --- images ---');
+    out.push(...assets);
+    out.push('');
+  }
   return out.join('\n');
 }
 
@@ -208,6 +232,13 @@ export function syncCode(code: string, prev: ParseResult, next: Diagram, opts: S
       const span = prev.edgeSpans[id];
       if (span) ops.push({ start: span.start, end: span.end, lines: [] });
     }
+  }
+
+  // ---- assets written inside the code itself (normally they are kept apart, see the store)
+  for (const [name, span] of Object.entries(prev.assetSpans)) {
+    const v = next.assets[name];
+    if (v === undefined) ops.push({ start: span.start, end: span.end, lines: [] });
+    else if (v !== prev.diagram.assets[name]) ops.push({ start: span.start, end: span.end, lines: [assetToLine(name, v)] });
   }
 
   // ---- style (scalar keys + per-type defaults)

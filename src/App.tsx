@@ -6,6 +6,7 @@ import { Toolbar } from './editor/Toolbar';
 import { Palette } from './editor/TypeDefaults';
 import { useT } from './i18n';
 import { openDiagram, saveDiagram, useToast } from './io/actions';
+import { imageFilesFromClipboard, importImageFiles } from './io/images';
 import { useStore } from './store/useStore';
 
 function isTyping(t: EventTarget | null): boolean {
@@ -22,6 +23,7 @@ function StatusBar() {
   const sel = useStore((s) => s.selection);
   const zoom = useStore((s) => s.view.zoom);
   const snap = useStore((s) => s.snap);
+  const warning = useStore((s) => s.autosaveWarning);
   const selText = sel.nodes.length > 0 ? sel.nodes.join(', ') : sel.edges.length > 0 ? sel.edges.join(', ') : t('なし');
   return (
     <div className="status">
@@ -30,7 +32,7 @@ function StatusBar() {
       {errors > 0 ? <span className="err">{t('構文エラー {n} 件', { n: errors })}</span> : <span className="ok">{t('構文 OK')}</span>}
       <span>{t('ズーム {v}%', { v: Math.round(zoom * 100) })}</span>
       <span>{t('スナップ {v}', { v: snap ? 'ON' : 'OFF' })}</span>
-      <span style={{ marginLeft: 'auto' }}>{t('ブラウザに自動保存中 (ローカル)')}</span>
+      {warning ? <span className="err" style={{ marginLeft: 'auto' }}>{t(warning)}</span> : <span style={{ marginLeft: 'auto' }}>{t('ブラウザに自動保存中 (ローカル)')}</span>}
     </div>
   );
 }
@@ -149,6 +151,13 @@ export function App() {
     };
     const onPaste = (e: ClipboardEvent) => {
       if (isTyping(e.target)) return;
+      // screenshots / pictures copied from other apps become image nodes
+      const files = imageFilesFromClipboard(e.clipboardData);
+      if (files.length) {
+        e.preventDefault();
+        void importImageFiles(files);
+        return;
+      }
       const text = e.clipboardData?.getData('text/plain');
       if (text && useStore.getState().pasteText(text)) e.preventDefault();
     };

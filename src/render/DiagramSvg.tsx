@@ -1,8 +1,8 @@
 import React from 'react';
 import { Box, perpLeft } from '../geometry/geometry';
-import { ArrowKind, DEdge, DStyle, Point, edgeTextDefaults, resolveNode } from '../model/types';
+import { ArrowKind, Assets, DEdge, DStyle, Point, edgeTextDefaults, resolveNode, resolveSrc } from '../model/types';
 import { LabelSvg } from './label';
-import { DiagramLayout, EdgeLayout, junctionDotVisible } from './layout';
+import { DiagramLayout, EdgeLayout, junctionDotVisible, nodeLabelPos } from './layout';
 
 export interface Selection {
   nodes: Set<string>;
@@ -24,7 +24,21 @@ const SEL_COLOR = '#2b7de9';
 // Nodes
 // ---------------------------------------------------------------------------
 
-function NodeShape({ box, style, selected, hover, edit }: { box: Box; style: DStyle; selected: boolean; hover: boolean; edit: boolean }) {
+function NodeShape({
+  box,
+  style,
+  assets,
+  selected,
+  hover,
+  edit,
+}: {
+  box: Box;
+  style: DStyle;
+  assets: Assets;
+  selected: boolean;
+  hover: boolean;
+  edit: boolean;
+}) {
   const n = box.node;
   const { cx, cy, w, h } = box;
   const rs = resolveNode(n, style);
@@ -90,6 +104,30 @@ function NodeShape({ box, style, selected, hover, edit }: { box: Box; style: DSt
       // understand fill="transparent" and paints such rectangles black.
       shape = edit ? <rect x={x} y={y} width={w} height={h} fill="transparent" stroke="none" /> : null;
       break;
+    case 'image': {
+      const href = resolveSrc(n.src, assets);
+      shape = (
+        <>
+          {fill !== 'none' && fill !== 'transparent' && <rect x={x} y={y} width={w} height={h} rx={rs.radius} fill={fill} stroke="none" />}
+          {href ? (
+            <image x={x} y={y} width={w} height={h} href={href} xlinkHref={href} preserveAspectRatio="xMidYMid meet" />
+          ) : (
+            // missing picture: show a placeholder so the problem is visible (also in exports)
+            <>
+              <rect x={x} y={y} width={w} height={h} fill="#f3f4f6" stroke="#9aa4b2" strokeWidth={1} strokeDasharray="4 3" />
+              <text x={cx} y={cy} textAnchor="middle" dominantBaseline="middle" fontSize={Math.min(12, h / 3)} fill="#6b7280">
+                {n.src ? n.src : 'image'}
+              </text>
+            </>
+          )}
+          {edit && <rect x={x} y={y} width={w} height={h} fill="transparent" stroke="none" />}
+          {stroke !== 'none' && stroke !== 'transparent' && (
+            <rect x={x} y={y} width={w} height={h} rx={rs.radius} fill="none" stroke={stroke} strokeWidth={sw} strokeDasharray={dashArr} />
+          )}
+        </>
+      );
+      break;
+    }
   }
   return (
     <>
@@ -245,13 +283,12 @@ export function DiagramContent({ layout, mode, selection, hoverNode }: DiagramSv
           const box = boxes.get(n.id)!;
           const lay = labels.get(n.id)!;
           const selected = !!selection?.nodes.has(n.id);
-          let lx = box.cx;
-          if (n.type === 'gain') lx = box.cx + (n.flip ? 1 : -1) * box.w * 0.12;
+          const lp = nodeLabelPos(box, lay, s);
           return (
             <g key={n.id} data-node={n.id} style={edit ? { cursor: 'move' } : undefined}>
-              <NodeShape box={box} style={s} selected={selected} hover={edit && hoverNode === n.id && !selected} edit={edit} />
+              <NodeShape box={box} style={s} assets={diagram.assets} selected={selected} hover={edit && hoverNode === n.id && !selected} edit={edit} />
               {(n.label !== '' || n.type === 'sum') && (
-                <LabelSvg layout={lay} x={lx} y={box.cy} color={n.color ?? s.textColor} />
+                <LabelSvg layout={lay} x={lp.x} y={lp.y} color={n.color ?? s.textColor} />
               )}
             </g>
           );

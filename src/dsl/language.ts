@@ -20,6 +20,11 @@ const NODE_WORDS = new Set([
   'ellipse',
   'triangle',
   'style',
+  'image',
+  'img',
+  'picture',
+  'photo',
+  'asset',
 ]);
 
 const ATTR_WORDS = new Set([
@@ -57,6 +62,8 @@ const ATTR_WORDS = new Set([
   'ortho',
   'lw',
   'hidden',
+  'src',
+  'caption',
 ]);
 
 export const blockDiagramLanguage = StreamLanguage.define<{ lineStart: boolean }>({
@@ -90,7 +97,7 @@ export const blockDiagramLanguage = StreamLanguage.define<{ lineStart: boolean }
       state.lineStart = false;
       if (first && NODE_WORDS.has(word)) return 'keyword';
       if (!first && ATTR_WORDS.has(word)) return 'propertyName';
-      if (/^(left|right|top|bottom|triangle|open|none|dot|both)$/.test(word)) return 'atom';
+      if (/^(left|right|top|bottom|center|triangle|open|none|dot|both)$/.test(word)) return 'atom';
       return 'variableName';
     }
     stream.next();

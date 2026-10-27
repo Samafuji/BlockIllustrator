@@ -35,6 +35,26 @@ export function nodeLabelText(n: DNode, s: DStyle): string {
   return n.label;
 }
 
+/** Where a node's label is drawn: inside the shape, or as a caption under an image. */
+export function nodeLabelPos(box: Box, lay: LabelLayout, s: DStyle): Point {
+  const n = box.node;
+  const rs = resolveNode(n, s);
+  const gap = rs.fontSize * 0.35;
+  switch (rs.labelPos) {
+    case 'bottom':
+      return { x: box.cx, y: box.cy + box.h / 2 + gap + lay.h / 2 };
+    case 'top':
+      return { x: box.cx, y: box.cy - box.h / 2 - gap - lay.h / 2 };
+    case 'left':
+      return { x: box.cx - box.w / 2 - gap * 1.5 - lay.w / 2, y: box.cy };
+    case 'right':
+      return { x: box.cx + box.w / 2 + gap * 1.5 + lay.w / 2, y: box.cy };
+    default:
+      if (n.type === 'gain') return { x: box.cx + (n.flip ? 1 : -1) * box.w * 0.12, y: box.cy };
+      return { x: box.cx, y: box.cy };
+  }
+}
+
 export function layoutDiagram(d: Diagram): DiagramLayout {
   const s = d.style;
   const boxes = new Map<string, Box>();
@@ -104,9 +124,10 @@ function computeBounds(
     add(b.cx - b.w / 2 - sw, b.cy - b.h / 2 - sw);
     add(b.cx + b.w / 2 + sw, b.cy + b.h / 2 + sw);
     const lay = labels.get(b.node.id);
-    if (lay) {
-      add(b.cx - lay.w / 2, b.cy - lay.h / 2);
-      add(b.cx + lay.w / 2, b.cy + lay.h / 2);
+    if (lay && (b.node.label !== '' || b.node.type === 'sum')) {
+      const p = nodeLabelPos(b, lay, s);
+      add(p.x - lay.w / 2, p.y - lay.h / 2);
+      add(p.x + lay.w / 2, p.y + lay.h / 2);
     }
   }
   for (const el of edges) {

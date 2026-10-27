@@ -1,6 +1,8 @@
 import {
   ARROW_KINDS,
   ArrowKind,
+  LABEL_POSITIONS,
+  LabelPos,
   DEFAULT_STYLE,
   DEdge,
   DNode,
@@ -132,6 +134,8 @@ export interface ParseResult {
   styleSpan?: Span;
   /** line index of each style entry: scalar keys by name, per-type defaults as "type:<nodeType>" */
   styleKeyLines: Record<string, number>;
+  /** line index of each `asset` statement */
+  assetSpans: Record<string, Span>;
 }
 
 const TYPE_ALIASES: Record<string, NodeType> = {
@@ -145,6 +149,9 @@ const TYPE_ALIASES: Record<string, NodeType> = {
   node: 'junction',
   ellipse: 'circle',
   triangle: 'gain',
+  img: 'image',
+  picture: 'image',
+  photo: 'image',
 };
 
 const STYLE_ALIASES: Record<string, StyleKey> = {};
@@ -266,6 +273,8 @@ export function parse(code: string): ParseResult {
   const style: DStyle = { ...DEFAULT_STYLE, defaults: {} };
   const nodes: DNode[] = [];
   const nodeSpans: Record<string, Span> = {};
+  const assetSpans: Record<string, Span> = {};
+  const assets: Record<string, string> = {};
   const styleKeyLines: Record<string, number> = {};
   let styleSpan: Span | undefined;
   const rawEdges: { edge: Omit<DEdge, 'id'>; line: number }[] = [];
@@ -326,6 +335,17 @@ export function parse(code: string): ParseResult {
         continue;
       }
 
+      // asset statement: asset <name> "data:image/...;base64,..."
+      if (first.kind === 'ident' && first.value.toLowerCase() === 'asset' && c.peek(1)?.kind === 'ident') {
+        c.next();
+        const name = c.expectIdent(tr('アセット名'));
+        const data = c.expectStr(tr('画像データ (data URL)'));
+        if (!c.done()) throw new Error(tr("余分なトークン: '{v}'", { v: c.peek()!.value }));
+        assets[name] = data;
+        assetSpans[name] = { start: li, end: li };
+        continue;
+      }
+
       // node statement: <type> <id> ...
       const typeName = first.kind === 'ident' ? first.value.toLowerCase() : '';
       const nodeType: NodeType | undefined = NODE_TYPES.includes(typeName as NodeType)
@@ -377,12 +397,13 @@ export function parse(code: string): ParseResult {
 
   errors.sort((a, b) => a.line - b.line);
   return {
-    diagram: { style, nodes, edges },
+    diagram: { style, nodes, edges, assets },
     errors,
     nodeSpans,
     edgeSpans,
     styleSpan,
     styleKeyLines,
+    assetSpans,
   };
 }
 
@@ -393,6 +414,7 @@ interface AttrTarget extends TypeDefaults {
   label?: string;
   flip?: boolean;
   hidden?: boolean;
+  src?: string;
 }
 
 /** Parse `size (w, h) fill #.. stroke #.. ...` attributes. Returns whether a position was given. */
@@ -479,6 +501,24 @@ function parseAttrs(o: AttrTarget, c: Cursor, opts: { allowPosition: boolean; st
       case 'solid':
         o.dash = key;
         break;
+      case 'caption':
+      case 'labelpos':
+      case 'label-pos': {
+        const v = c.expectIdent(tr('caption の位置 (center|top|bottom|left|right)')).toLowerCase();
+        const map: Record<string, LabelPos> = { inside: 'center', middle: 'center', below: 'bottom', above: 'top' };
+        const pos = (map[v] ?? v) as LabelPos;
+        if (!LABEL_POSITIONS.includes(pos)) throw new Error(tr('caption は {v} のいずれかです', { v: LABEL_POSITIONS.join(' | ') }));
+        o.labelPos = pos;
+        break;
+      }
+      case 'src':
+      case 'image': {
+        nodeOnly(t);
+        const v = c.next();
+        if (!v || (v.kind !== 'ident' && v.kind !== 'str')) throw new Error(tr('src の後にアセット名か URL が必要です'));
+        o.src = v.value;
+        break;
+      }
       default:
         throw new Error(tr("未知の属性: '{v}'", { v: t.value }));
     }

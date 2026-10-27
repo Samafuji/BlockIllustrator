@@ -5,6 +5,7 @@ import { DEdge, Point, SIDES, Side } from '../model/types';
 import { DiagramContent } from '../render/DiagramSvg';
 import { DiagramLayout, EdgeLayout, layoutDiagram } from '../render/layout';
 import { ViewState, useStore } from '../store/useStore';
+import { importImageFiles } from '../io/images';
 import { canvasApi } from './canvasApi';
 import { codeEditorApi } from './CodePanel';
 
@@ -27,7 +28,8 @@ type Interaction =
       /** bounding box of the moved group at drag start */
       group: { left: number; right: number; top: number; bottom: number };
     }
-  | { kind: 'resize'; id: string; corner: Corner; fixed: Point; moved: boolean }
+  /** `aspect` (w/h) is set for images, whose proportions are kept unless Shift is held */
+  | { kind: 'resize'; id: string; corner: Corner; fixed: Point; moved: boolean; aspect?: number }
   /** drag a bend point. `bake` turns an auto-routed line into explicit waypoints on the first move */
   | { kind: 'waypoint'; edgeId: string; index: number; moved: boolean; bake?: Bake }
   /** drag an axis-aligned segment: moves its bend point(s) perpendicular to the segment */
@@ -375,7 +377,8 @@ export function Canvas() {
         x: corner.includes('e') ? box.cx - box.w / 2 : box.cx + box.w / 2,
         y: corner.includes('s') ? box.cy - box.h / 2 : box.cy + box.h / 2,
       };
-      inter.current = { kind: 'resize', id, corner, fixed, moved: false };
+      const aspect = box.node.type === 'image' && box.h > 0 ? box.w / box.h : undefined;
+      inter.current = { kind: 'resize', id, corner, fixed, moved: false, aspect };
       svg.setPointerCapture(e.pointerId);
       return;
     }
@@ -592,6 +595,10 @@ export function Canvas() {
         if (!node) return;
         if (node.type === 'sum' || node.type === 'junction' || (node.type === 'circle' && e.shiftKey)) {
           w = h = Math.max(w, h);
+        } else if (it.aspect && !e.shiftKey) {
+          // keep the picture's proportions; the larger relative change wins
+          if (w / it.aspect >= h) h = Math.max(10, Math.round(w / it.aspect));
+          else w = Math.max(10, Math.round(h * it.aspect));
         }
         const cx = it.fixed.x + (sx * w) / 2;
         const cy = it.fixed.y + (sy * h) / 2;
@@ -761,8 +768,22 @@ export function Canvas() {
   if (transient.connect?.target) portNodeIds.add(transient.connect.target);
   const singleEdge = selection.edges.length === 1 && selection.nodes.length === 0 ? layout.edges.find((x) => x.edge.id === selection.edges[0]) : undefined;
 
+  // image files dropped onto the canvas become image nodes at the drop point
+  const onDragOver = (e: React.DragEvent) => {
+    if (e.dataTransfer.types.includes('Files')) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    }
+  };
+  const onDrop = (e: React.DragEvent) => {
+    if (!e.dataTransfer.files?.length) return;
+    e.preventDefault();
+    const world = toWorld(e.clientX, e.clientY);
+    void importImageFiles(e.dataTransfer.files, { x: snapV(world.x), y: snapV(world.y) });
+  };
+
   return (
-    <div className="canvas-wrap" ref={wrapRef} tabIndex={0} style={{ cursor: connectMode ? 'crosshair' : cursor }}>
+    <div className="canvas-wrap" ref={wrapRef} tabIndex={0} style={{ cursor: connectMode ? 'crosshair' : cursor }} onDragOver={onDragOver} onDrop={onDrop}>
       <svg
         ref={svgRef}
         className="canvas"
@@ -987,7 +1008,7 @@ export function Canvas() {
       <div className="canvas-hint" style={connectMode ? { color: '#1b57a8', background: 'rgba(230,240,253,0.95)', fontWeight: 600 } : undefined}>
         {connectMode
           ? '接続モード: 始点のブロックから終点のブロックへドラッグ（ポート○に落とすと辺を固定、Esc / C で終了）'
-          : t('ドラッグ: 移動 ・ ポート○ / 「接続」(C): 線を引く ・ 線をダブルクリック: 分岐点を挿入 ・ 線の端点ドラッグ: つなぎ替え ・ 空白ダブルクリック: ブロック追加')}
+          : t('ドラッグ: 移動 ・ ポート○ / 「接続」(C): 線を引く ・ 線をダブルクリック: 分岐点を挿入 ・ 線の端点ドラッグ: つなぎ替え ・ 空白ダブルクリック: ブロック追加 ・ 画像はドロップ / Ctrl+V で追加')}
       </div>
       <div className="canvas-hud">
         <button className="btn" onClick={() => canvasApi.current?.zoomBy(1 / 1.2)} title={t('縮小')}>

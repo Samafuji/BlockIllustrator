@@ -10,7 +10,8 @@ export type NodeType =
   | 'gain'
   | 'sum'
   | 'junction'
-  | 'text';
+  | 'text'
+  | 'image';
 
 export const NODE_TYPES: NodeType[] = [
   'block',
@@ -21,6 +22,7 @@ export const NODE_TYPES: NodeType[] = [
   'sum',
   'junction',
   'text',
+  'image',
 ];
 
 export type Side = 'left' | 'right' | 'top' | 'bottom';
@@ -30,6 +32,9 @@ export type ArrowKind = 'triangle' | 'open' | 'none' | 'dot' | 'both';
 export const ARROW_KINDS: ArrowKind[] = ['triangle', 'open', 'none', 'dot', 'both'];
 
 export type DashKind = 'solid' | 'dashed' | 'dotted';
+/** Where a node's label sits: inside the shape, or beside it (captions of images). */
+export type LabelPos = 'center' | 'top' | 'bottom' | 'left' | 'right';
+export const LABEL_POSITIONS: LabelPos[] = ['center', 'top', 'bottom', 'left', 'right'];
 export type RouteKind = 'auto' | 'straight';
 export type SumStyle = 'plain' | 'cross' | 'sigma';
 
@@ -58,6 +63,24 @@ export interface DNode {
   hidden?: boolean;
   /** outline dash pattern (e.g. group boxes) */
   dash?: DashKind;
+  /** image: asset name (see Diagram.assets) or a URL / data URL */
+  src?: string;
+  /** label placement (`caption bottom`); images default to bottom, everything else to center */
+  labelPos?: LabelPos;
+}
+
+/** Embedded images: name -> data URL (`asset name "data:image/png;base64,..."`). */
+export type Assets = Record<string, string>;
+
+/** Resolve an image node's `src` to something an <image href> can load. */
+export function resolveSrc(src: string | undefined, assets: Assets): string | undefined {
+  if (!src) return undefined;
+  return assets[src] ?? src;
+}
+
+/** Images are embedded as data URLs; anything else cannot be exported reliably. */
+export function isDataUrl(s: string): boolean {
+  return /^data:image\//i.test(s);
 }
 
 export interface DEdge {
@@ -90,9 +113,10 @@ export interface TypeDefaults {
   radius?: number;
   sumStyle?: SumStyle;
   dash?: DashKind;
+  labelPos?: LabelPos;
 }
 
-export const TYPE_DEFAULT_KEYS: (keyof TypeDefaults)[] = ['w', 'h', 'fill', 'stroke', 'color', 'fontSize', 'strokeWidth', 'radius', 'sumStyle', 'dash'];
+export const TYPE_DEFAULT_KEYS: (keyof TypeDefaults)[] = ['w', 'h', 'fill', 'stroke', 'color', 'fontSize', 'strokeWidth', 'radius', 'sumStyle', 'dash', 'labelPos'];
 
 export interface DStyle {
   defaults: Partial<Record<NodeType, TypeDefaults>>;
@@ -120,6 +144,7 @@ export interface Diagram {
   style: DStyle;
   nodes: DNode[];
   edges: DEdge[];
+  assets: Assets;
 }
 
 export const DEFAULT_STYLE: DStyle = {
@@ -149,7 +174,7 @@ export type StyleKey = Exclude<keyof DStyle, 'defaults'>;
 export const STYLE_KEYS = (Object.keys(DEFAULT_STYLE) as (keyof DStyle)[]).filter((k) => k !== 'defaults') as StyleKey[];
 
 export function emptyDiagram(): Diagram {
-  return { style: { ...DEFAULT_STYLE, defaults: {} }, nodes: [], edges: [] };
+  return { style: { ...DEFAULT_STYLE, defaults: {} }, nodes: [], edges: [], assets: {} };
 }
 
 /** Fully resolved appearance of a node: node override -> type default -> global style. */
@@ -164,6 +189,7 @@ export interface ResolvedNode {
   radius: number;
   sumStyle: SumStyle;
   dash?: DashKind;
+  labelPos: LabelPos;
 }
 
 /** Defaults for free text on edges (labels, signs): the "text" type defaults, then the global style. */
@@ -193,8 +219,9 @@ export function resolveNode(n: DNode, s: DStyle): ResolvedNode {
       w = n.w ?? d.w ?? s.blockWidth;
       h = n.h ?? d.h ?? s.blockHeight;
   }
-  const stroke = n.stroke ?? d.stroke ?? s.blockStroke;
-  const fill = n.fill ?? d.fill ?? (n.type === 'junction' ? stroke : s.blockFill);
+  // images have no frame / background unless asked for
+  const stroke = n.stroke ?? d.stroke ?? (n.type === 'image' ? 'none' : s.blockStroke);
+  const fill = n.fill ?? d.fill ?? (n.type === 'junction' ? stroke : n.type === 'image' ? 'none' : s.blockFill);
   return {
     w,
     h,
@@ -206,6 +233,7 @@ export function resolveNode(n: DNode, s: DStyle): ResolvedNode {
     radius: n.radius ?? d.radius ?? (n.type === 'rounded' ? Math.min(10, h / 2) : s.cornerRadius),
     sumStyle: n.sumStyle ?? d.sumStyle ?? 'plain',
     dash: n.dash ?? d.dash,
+    labelPos: n.labelPos ?? d.labelPos ?? (n.type === 'image' ? 'bottom' : 'center'),
   };
 }
 
@@ -243,4 +271,12 @@ export const TYPE_PREFIX: Record<NodeType, string> = {
   sum: 's',
   junction: 'j',
   text: 't',
+  image: 'img',
 };
+
+/** Names of the embedded images referenced by image nodes. */
+export function usedAssets(d: Diagram): Set<string> {
+  const used = new Set<string>();
+  for (const n of d.nodes) if (n.type === 'image' && n.src && d.assets[n.src] !== undefined) used.add(n.src);
+  return used;
+}

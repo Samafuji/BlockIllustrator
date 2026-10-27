@@ -3,8 +3,31 @@
 // path (all commands incl. arcs), text and nested <g transform>.
 // Text uses the PostScript standard fonts (Times / Helvetica / Courier) with
 // ISO Latin-1 encoding; characters outside Latin-1 are replaced by '?'.
+// <image> elements are written as 8-bit RGB `colorimage` data when the caller
+// supplies their decoded samples (see export.ts).
 
 type M = [number, number, number, number, number, number]; // a b c d e f
+
+/** Decoded picture: RGB samples, row-major from the top-left, 3 bytes per pixel. */
+export interface RasterImage {
+  w: number;
+  h: number;
+  rgb: Uint8Array;
+}
+
+const HEX = Array.from({ length: 256 }, (_, i) => i.toString(16).padStart(2, '0'));
+
+function toHex(bytes: Uint8Array): string[] {
+  const lines: string[] = [];
+  const perLine = 36; // 72 hex characters per line
+  for (let i = 0; i < bytes.length; i += perLine) {
+    let s = '';
+    const end = Math.min(bytes.length, i + perLine);
+    for (let j = i; j < end; j++) s += HEX[bytes[j]];
+    lines.push(s);
+  }
+  return lines;
+}
 
 interface Ctx {
   m: M;
@@ -340,7 +363,7 @@ function psString(s: string): string {
   return out;
 }
 
-export function svgToEps(svgText: string, width: number, height: number): string {
+export function svgToEps(svgText: string, width: number, height: number, images?: Map<string, RasterImage>): string {
   const doc = new DOMParser().parseFromString(svgText, 'image/svg+xml');
   const root = doc.documentElement;
   const W = Math.ceil(width);
@@ -525,6 +548,40 @@ export function svgToEps(svgText: string, width: number, height: number): string
       case 'path':
         emitPath(parsePath(el.getAttribute('d') || ''), c, false);
         break;
+      case 'image': {
+        const href = el.getAttribute('href') || el.getAttribute('xlink:href');
+        const img = href ? images?.get(href) : undefined;
+        if (!img) break;
+        // preserveAspectRatio="xMidYMid meet": fit the picture inside the box, centered
+        const bx = n('x');
+        const by = n('y');
+        const bw = n('width');
+        const bh = n('height');
+        if (bw <= 0 || bh <= 0) break;
+        const par = el.getAttribute('preserveAspectRatio') || 'xMidYMid meet';
+        let dx = bx;
+        let dy = by;
+        let dw = bw;
+        let dh = bh;
+        if (!/none/.test(par)) {
+          const k = Math.min(bw / img.w, bh / img.h);
+          dw = img.w * k;
+          dh = img.h * k;
+          dx = bx + (bw - dw) / 2;
+          dy = by + (bh - dh) / 2;
+        }
+        // unit square -> drawn rectangle -> current transform
+        const T = mul(c.m, [dw, 0, 0, dh, dx, dy]);
+        body.push(
+          'gsave',
+          `[${T.map(f).join(' ')}] concat`,
+          `/picstr ${img.w * 3} string def`,
+          `${img.w} ${img.h} 8 [${img.w} 0 0 ${img.h} 0 0] { currentfile picstr readhexstring pop } false 3 colorimage`,
+          ...toHex(img.rgb),
+          'grestore',
+        );
+        break;
+      }
       case 'text': {
         const text = el.textContent ?? '';
         if (!text) break;

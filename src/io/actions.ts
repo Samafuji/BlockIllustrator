@@ -77,7 +77,8 @@ export async function saveDiagram(forceAs = false) {
     const st = useStore.getState();
     const current = st.fileName ? { name: st.fileName, handle: st.fileHandle } : null;
     const suggested = st.fileName ?? 'diagram.bd';
-    const ref = forceAs ? await saveAs(st.code, suggested) : await save(st.code, current, suggested);
+    const text = st.serialize();
+    const ref = forceAs ? await saveAs(text, suggested) : await save(text, current, suggested);
     if (!ref) return;
     st.markSaved(ref.name, ref.handle);
     toast(ref.handle ? t('{name} に保存しました', { name: ref.name }) : t('{name} をダウンロードしました', { name: ref.name }));

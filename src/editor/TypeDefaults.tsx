@@ -1,9 +1,10 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useT } from '../i18n';
-import { NodeType, TYPE_DEFAULT_KEYS, TypeDefaults, resolveNode } from '../model/types';
+import { LABEL_POSITIONS, LabelPos, NodeType, TYPE_DEFAULT_KEYS, TypeDefaults, resolveNode } from '../model/types';
 import { useStore } from '../store/useStore';
+import { pickAndAddImages } from '../io/images';
 import { canvasApi } from './canvasApi';
-import { ColorField, NumField, NumFieldInline, SelectField } from './Inspector';
+import { ColorField, LABEL_POS_LABELS, NumField, NumFieldInline, SelectField } from './Inspector';
 
 /** Palette entries (labels are Japanese dictionary keys, translated at render time). */
 export const PALETTE_ITEMS: { type: NodeType; label: string; icon: string }[] = [
@@ -15,6 +16,7 @@ export const PALETTE_ITEMS: { type: NodeType; label: string; icon: string }[] = 
   { type: 'circle', label: '円', icon: '○' },
   { type: 'diamond', label: 'ひし形', icon: '◇' },
   { type: 'text', label: 'テキスト', icon: 'T' },
+  { type: 'image', label: '画像', icon: '🖼' },
 ];
 
 /**
@@ -101,7 +103,7 @@ export function TypeDefaultsPanel({ type, label }: { type: NodeType; label: stri
           />
         </>
       )}
-      {(type === 'block' || type === 'rounded') && (
+      {(type === 'block' || type === 'rounded' || type === 'image') && (
         <NumField label={t('角丸半径')} value={d.radius} placeholder={String(base.radius)} min={0} onCommit={(v) => upd({ radius: v })} />
       )}
       {type === 'junction' && (
@@ -140,6 +142,17 @@ export function TypeDefaultsPanel({ type, label }: { type: NodeType; label: stri
           <ColorField label={t('文字色')} value={d.color} placeholder={base.color} onLive={(v) => upd({ color: v }, true)} onCommit={(v) => upd({ color: v })} />
           <NumField label={t('文字サイズ')} value={d.fontSize} placeholder={String(base.fontSize)} min={1} onCommit={(v) => upd({ fontSize: v })} />
         </>
+      )}
+      {type !== 'junction' && type !== 'text' && (
+        <SelectField
+          label={type === 'image' ? t('キャプションの位置') : t('ラベルの位置')}
+          value={d.labelPos ?? 'default'}
+          options={[
+            { value: 'default', label: t('既定 ({v})', { v: t(LABEL_POS_LABELS[base.labelPos]) }) },
+            ...LABEL_POSITIONS.map((p) => ({ value: p, label: t(LABEL_POS_LABELS[p]) })),
+          ]}
+          onCommit={(v) => upd({ labelPos: v === 'default' ? undefined : (v as LabelPos) })}
+        />
       )}
       <div className="btn-row">
         <button className="btn" onClick={clearOverrides} disabled={overridden === 0} title={t('この種類の図形に付いている個別のサイズ・色などを外し、すべて既定値に揃えます')}>
@@ -194,6 +207,10 @@ function PaletteItem({ type, label, icon }: { type: NodeType; label: string; ico
     };
   }, [open]);
   const add = () => {
+    if (type === 'image') {
+      void pickAndAddImages();
+      return;
+    }
     const st = useStore.getState();
     const c = canvasApi.current?.viewportCenterWorld() ?? { x: 200, y: 150 };
     const g = st.diagram.style.grid || 10;
@@ -201,9 +218,10 @@ function PaletteItem({ type, label, icon }: { type: NodeType; label: string; ico
     canvasApi.current?.focus();
   };
   const name = t(label);
+  const addTitle = type === 'image' ? t('画像ファイルを選んで追加（キャンバスへのドロップ / Ctrl+V でも追加できます）') : t('{label}を追加', { label: name });
   return (
     <div className="pal-row" ref={ref}>
-      <button className="pal-item" onClick={add} title={t('{label}を追加', { label: name })}>
+      <button className="pal-item" onClick={add} title={addTitle}>
         <span className="pal-ico">{icon}</span>
         <span className="pal-label">{name}</span>
       </button>
