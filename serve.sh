@@ -7,14 +7,32 @@ if [ ! -f "$DIR/index.html" ]; then
   echo "dist/index.html not found. Download it from GitHub or run 'npm run build'." >&2
   exit 1
 fi
+
+PY=""
+if command -v python3 >/dev/null 2>&1; then PY=python3
+elif command -v python >/dev/null 2>&1; then PY=python
+fi
+
+# pick the first free port starting at $PORT (another program may own it)
+if [ -n "$PY" ]; then
+  PORT="$("$PY" -c 'import socket,sys
+p=int(sys.argv[1])
+for q in range(p,p+50):
+    s=socket.socket()
+    try:
+        s.bind(("127.0.0.1",q)); s.close(); print(q); break
+    except OSError:
+        s.close()
+' "$PORT")"
+  [ -z "$PORT" ] && { echo "No free port found." >&2; exit 1; }
+fi
+
 URL="http://localhost:$PORT/"
 echo "Block Illustrator: $URL  (Ctrl+C to stop)"
 ( sleep 1; (command -v xdg-open >/dev/null && xdg-open "$URL") || (command -v open >/dev/null && open "$URL") ) >/dev/null 2>&1 &
 cd "$DIR" || exit 1
-if command -v python3 >/dev/null 2>&1; then
-  exec python3 -m http.server "$PORT"
-elif command -v python >/dev/null 2>&1; then
-  exec python -m http.server "$PORT"
+if [ -n "$PY" ]; then
+  exec "$PY" -m http.server "$PORT" --bind 127.0.0.1
 elif command -v npx >/dev/null 2>&1; then
   exec npx --yes serve -l "$PORT" .
 else

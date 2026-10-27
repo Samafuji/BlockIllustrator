@@ -14,13 +14,25 @@ if (-not (Test-Path $index)) {
   exit 1
 }
 
-$listener = New-Object System.Net.HttpListener
-$prefix = "http://localhost:$Port/"
-$listener.Prefixes.Add($prefix)
-try {
-  $listener.Start()
-} catch {
-  Write-Host "Could not listen on $prefix ($($_.Exception.Message)). Try another port: serve.cmd -Port 8080" -ForegroundColor Red
+# Try the requested port first, then the following ones (another program or a
+# Windows URL reservation may already own the port).
+$listener = $null
+$prefix = ''
+for ($p = $Port; $p -lt $Port + 50; $p++) {
+  $candidate = New-Object System.Net.HttpListener
+  $candidate.Prefixes.Add("http://localhost:$p/")
+  try {
+    $candidate.Start()
+    $listener = $candidate
+    $prefix = "http://localhost:$p/"
+    if ($p -ne $Port) { Write-Host "Port $Port is in use; using port $p instead." -ForegroundColor Yellow }
+    break
+  } catch {
+    $candidate.Close()
+  }
+}
+if ($null -eq $listener) {
+  Write-Host "Could not find a free port between $Port and $($Port + 49). Try: serve.cmd -Port 9000" -ForegroundColor Red
   exit 1
 }
 
