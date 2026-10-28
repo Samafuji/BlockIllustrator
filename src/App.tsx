@@ -24,7 +24,8 @@ function StatusBar() {
   const zoom = useStore((s) => s.view.zoom);
   const snap = useStore((s) => s.snap);
   const warning = useStore((s) => s.autosaveWarning);
-  const selText = sel.nodes.length > 0 ? sel.nodes.join(', ') : sel.edges.length > 0 ? sel.edges.join(', ') : t('なし');
+  const parts = [...sel.nodes, ...sel.edges, ...sel.labels.map((id) => `${id}.label`)];
+  const selText = parts.length > 0 ? parts.join(', ') : t('なし');
   return (
     <div className="status">
       <span>{t('ノード {n} ・ 接続 {m}', { n: nodes, m: edges })}</span>
@@ -98,7 +99,9 @@ export function App() {
       }
       if (mod && key === 'a') {
         e.preventDefault();
-        st.setSelection({ nodes: st.diagram.nodes.map((n) => n.id), edges: [] });
+        // Ctrl+Shift+A: every piece of text (text nodes + line labels), e.g. to line them up
+        if (e.shiftKey) st.selectAllText();
+        else st.setSelection({ nodes: st.diagram.nodes.map((n) => n.id), edges: [], labels: [] });
         return;
       }
       if (e.key === 'Delete' || e.key === 'Backspace') {

@@ -68,8 +68,9 @@ export function Toolbar() {
   const snap = useStore((s) => s.snap);
   const showCode = useStore((s) => s.showCode);
   const followEdges = useStore((s) => s.followEdges);
-  const hasSel = useStore((s) => s.selection.nodes.length + s.selection.edges.length > 0);
-  const selCount = useStore((s) => s.selection.nodes.length);
+  const hasSel = useStore((s) => s.selection.nodes.length + s.selection.edges.length + s.selection.labels.length > 0);
+  // nodes and connection labels can be aligned together
+  const selCount = useStore((s) => s.selection.nodes.length + s.selection.labels.length);
   const transparentBg = useStore((s) => s.diagram.style.background === 'transparent' || s.diagram.style.background === 'none');
   const st = useStore.getState;
 
@@ -124,24 +125,28 @@ export function Toolbar() {
           ⧉
         </button>
       </div>
-      <Menu label={t('整列')} disabled={selCount < 2} title={t('複数のノード (Shift+クリック / 範囲選択) を揃えます')}>
-        <button className="menu-item" onClick={() => st().alignSelection('left')}>
+      <Menu label={t('整列')} title={t('複数のノード・線ラベル (Shift+クリック / 範囲選択) を揃えます')}>
+        <button className="menu-item" onClick={() => st().selectAllText()} title={t('テキストノードと線ラベルをすべて選択します。そのまま整列で揃えられます')}>
+          {t('テキストをすべて選択')} <small>Ctrl+Shift+A</small>
+        </button>
+        <div className="menu-sep" />
+        <button className="menu-item" onClick={() => st().alignSelection('left')} disabled={selCount < 2}>
           ⇤ {t('左揃え')} <small>Alt+A</small>
         </button>
-        <button className="menu-item" onClick={() => st().alignSelection('hcenter')}>
+        <button className="menu-item" onClick={() => st().alignSelection('hcenter')} disabled={selCount < 2}>
           ⇹ {t('左右中央揃え')} <small>Alt+H</small>
         </button>
-        <button className="menu-item" onClick={() => st().alignSelection('right')}>
+        <button className="menu-item" onClick={() => st().alignSelection('right')} disabled={selCount < 2}>
           ⇥ {t('右揃え')} <small>Alt+D</small>
         </button>
         <div className="menu-sep" />
-        <button className="menu-item" onClick={() => st().alignSelection('top')}>
+        <button className="menu-item" onClick={() => st().alignSelection('top')} disabled={selCount < 2}>
           ⤒ {t('上揃え')} <small>Alt+W</small>
         </button>
-        <button className="menu-item" onClick={() => st().alignSelection('vcenter')}>
+        <button className="menu-item" onClick={() => st().alignSelection('vcenter')} disabled={selCount < 2}>
           ⇳ {t('上下中央揃え')} <small>Alt+V</small>
         </button>
-        <button className="menu-item" onClick={() => st().alignSelection('bottom')}>
+        <button className="menu-item" onClick={() => st().alignSelection('bottom')} disabled={selCount < 2}>
           ⤓ {t('下揃え')} <small>Alt+S</small>
         </button>
         <div className="menu-sep" />
@@ -151,7 +156,7 @@ export function Toolbar() {
         <button className="menu-item" onClick={() => st().distributeSelection('y')} disabled={selCount < 3}>
           {t('縦に等間隔')} <small>Alt+Shift+V</small>
         </button>
-        <button className="menu-item" onClick={() => st().sameSizeSelection()}>
+        <button className="menu-item" onClick={() => st().sameSizeSelection()} disabled={selCount < 2}>
           {t('サイズを最初の図形に揃える')}
         </button>
       </Menu>

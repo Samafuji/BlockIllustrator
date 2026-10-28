@@ -430,6 +430,7 @@ textarea {
 .canvas-hint {
   position: absolute;
   left: 12px;
+  right: 200px; /* keep clear of the zoom controls */
   bottom: 12px;
   color: var(--muted);
   font-size: 12px;
@@ -648,4 +649,18 @@ textarea {
   max-width: 100%;
   max-height: 130px;
   object-fit: contain;
+}
+
+/* position read-out shown next to the element while it is dragged */
+.canvas-readout {
+  position: absolute;
+  pointer-events: none;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: #1b57a8;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid #b7d1f5;
+  border-radius: 4px;
+  padding: 1px 5px;
+  white-space: nowrap;
 }

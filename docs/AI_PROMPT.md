@@ -112,7 +112,7 @@ arrow triangle|open|none|dot|both
 width 2                  線の太さ
 color #rrggbb            線とラベルの色
 dashed | dotted          線種
-straight                 直交ではなく直線で結ぶ
+straight                 直交ではなく直線で結ぶ（角度は 0 / 30 / 45 / 60 / 90° に自動で揃う）
 fontSize 12              ラベルの文字サイズ
 ```
 

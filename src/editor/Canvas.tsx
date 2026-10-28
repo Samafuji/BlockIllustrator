@@ -1,10 +1,10 @@
 import { useT } from '../i18n';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Box, SIDE_DIR, anchorOnSide, followEdgesAfterMove, pointInBox, sideToward } from '../geometry/geometry';
+import { Box, SIDE_DIR, anchorOnSide, followEdgesAfterMove, pointInBox, sideToward, snapAngleFrom } from '../geometry/geometry';
 import { DEdge, Point, SIDES, Side } from '../model/types';
 import { DiagramContent } from '../render/DiagramSvg';
 import { DiagramLayout, EdgeLayout, layoutDiagram } from '../render/layout';
-import { ViewState, useStore } from '../store/useStore';
+import { ViewState, placeEdgeLabels, useStore } from '../store/useStore';
 import { importImageFiles } from '../io/images';
 import { canvasApi } from './canvasApi';
 import { codeEditorApi } from './CodePanel';
@@ -16,15 +16,21 @@ type Interaction =
   | { kind: 'pan'; startClient: Point; startView: ViewState }
   | { kind: 'marquee'; start: Point; additive: boolean }
   | {
+      /** drag the selected nodes and connection labels together */
       kind: 'dragNodes';
       start: Point;
       orig: Map<string, Point>;
       origWps: Map<string, Point[]>;
-      primary: string;
+      /** original centers of the selected connection labels (edge id -> world position) */
+      origLabels: Map<string, Point>;
+      /** original position of the thing under the cursor (what the grid snapping is applied to) */
+      primary: Point;
+      /** grid snapping applies when a node was grabbed; labels are placed freely (guides only) */
+      snapGrid: boolean;
       moved: boolean;
-      /** alignment guide candidates from the nodes that are not being moved */
-      guidesX: number[];
-      guidesY: number[];
+      /** alignment guide candidates from the nodes / labels that are not being moved */
+      guidesX: Guide[];
+      guidesY: Guide[];
       /** bounding box of the moved group at drag start */
       group: { left: number; right: number; top: number; bottom: number };
     }
@@ -36,7 +42,6 @@ type Interaction =
   | { kind: 'segment'; edgeId: string; idx: number[]; axis: 'x' | 'y'; orig: number; start: Point; moved: boolean; bake: Bake }
   /** drag the line body: translate every waypoint (ends stay attached to their blocks) */
   | { kind: 'edgeMove'; edgeId: string; start: Point; moved: boolean; bake: Bake }
-  | { kind: 'label'; edgeId: string; mid: Point; moved: boolean }
   /** drag the label of a selected node: changes its `offset` */
   | { kind: 'nodeLabel'; id: string; start: Point; orig: Point; moved: boolean }
   | {
@@ -54,6 +59,22 @@ interface Transient {
   connect?: { from: Point; to: Point; target: string | null };
   /** smart alignment guides shown while dragging */
   guides?: { x?: number; y?: number };
+  /** small position read-out next to the dragged element (world coordinates of its anchor) */
+  readout?: { x: number; y: number; text: string };
+}
+
+/**
+ * One alignment guide: a coordinate of an unmoved node / label, which kind of edge it is
+ * (0 = left/top, 1 = center, 2 = right/bottom) and where that object is, so that nearby
+ * objects win over far-away ones when several guides are within reach.
+ */
+interface Guide {
+  v: number;
+  kind: 0 | 1 | 2;
+  ox: number;
+  oy: number;
+  /** the guide comes from a connection label (text), not from a shape */
+  label: boolean;
 }
 
 const HANDLE = '#2b7de9';
@@ -87,16 +108,31 @@ function applyBake(ed: DEdge, bake: Bake): void {
   }
 }
 
-/** Closest guide to any of `values` within `thr`; returns the shift needed to land on it. */
-function bestGuide(values: number[], guides: number[], thr: number): { diff: number; guide: number } | null {
-  let best: { diff: number; guide: number } | null = null;
-  for (const v of values) {
-    for (const g of guides) {
-      const diff = g - v;
-      if (Math.abs(diff) <= thr && (!best || Math.abs(diff) < Math.abs(best.diff))) best = { diff, guide: g };
-    }
+/**
+ * Best guide within `thr` of the moved group's edges / center (`values`, indexed by kind),
+ * returning the shift needed to land on it. Only like meets like (left with left, center
+ * with center, ...), and among the candidates a guide from an object close to the group
+ * (`near`: the group's center on the other axis) beats one from a distant object, so
+ * aligning two neighbouring blocks is not hijacked by something else on the canvas.
+ */
+function bestGuide(values: [number, number, number], guides: Guide[], thr: number, near: Point, movingShapes: boolean): { diff: number; guide: number } | null {
+  let best: { diff: number; guide: number; score: number } | null = null;
+  for (const g of guides) {
+    const diff = g.v - values[g.kind];
+    if (Math.abs(diff) > thr) continue;
+    const dist = Math.hypot(g.ox - near.x, g.oy - near.y);
+    // 1 px of misalignment is worth about 100 units of distance; center-to-center wins over
+    // edge-to-edge, and shapes being moved prefer other shapes over the text of line labels
+    const score = Math.abs(diff) + dist / 100 + (g.kind === 1 ? 0 : 1) + (g.label && movingShapes ? 2 : 0);
+    if (!best || score < best.score) best = { diff, guide: g.v, score };
   }
   return best;
+}
+
+/** Guide candidates of one unmoved box: its left / center / right (or top / center / bottom). */
+function pushGuides(gx: Guide[], gy: Guide[], cx: number, cy: number, w: number, h: number, label = false): void {
+  gx.push({ v: cx - w / 2, kind: 0, ox: cx, oy: cy, label }, { v: cx, kind: 1, ox: cx, oy: cy, label }, { v: cx + w / 2, kind: 2, ox: cx, oy: cy, label });
+  gy.push({ v: cy - h / 2, kind: 0, ox: cx, oy: cy, label }, { v: cy, kind: 1, ox: cx, oy: cy, label }, { v: cy + h / 2, kind: 2, ox: cx, oy: cy, label });
 }
 
 export function Canvas() {
@@ -113,7 +149,10 @@ export function Canvas() {
   const layout = useMemo(() => layoutDiagram(diagram), [diagram]);
   const layoutRef = useRef<DiagramLayout>(layout);
   layoutRef.current = layout;
-  const selSets = useMemo(() => ({ nodes: new Set(selection.nodes), edges: new Set(selection.edges) }), [selection]);
+  const selSets = useMemo(
+    () => ({ nodes: new Set(selection.nodes), edges: new Set(selection.edges), labels: new Set(selection.labels) }),
+    [selection],
+  );
 
   const wrapRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -131,11 +170,58 @@ export function Canvas() {
     return { x: (clientX - rect.left - v.x) / v.zoom, y: (clientY - rect.top - v.y) / v.zoom };
   }, []);
 
-  const snapV = useCallback((v: number): number => {
+  /** Snap a coordinate to the grid (unless snapping is off, or `free` = Alt is held). */
+  const snapV = useCallback((v: number, free = false): number => {
     const st = useStore.getState();
     const g = st.diagram.style.grid || 10;
-    return st.snap ? Math.round(v / g) * g : Math.round(v * 10) / 10;
+    return st.snap && !free ? Math.round(v / g) * g : Math.round(v * 10) / 10;
   }, []);
+
+  /**
+   * Start dragging the current selection (nodes + connection labels). `primary` is the
+   * original position of the grabbed element; `snapGrid` tells whether it snaps to the grid.
+   */
+  const beginDrag = (world: Point, primary: Point, snapGrid: boolean): boolean => {
+    const st = useStore.getState();
+    const sel = st.selection;
+    const lay = layoutRef.current;
+    const orig = new Map<string, Point>();
+    for (const nid of sel.nodes) {
+      const n = st.diagram.nodes.find((x) => x.id === nid);
+      if (n) orig.set(nid, { x: n.x, y: n.y });
+    }
+    const origLabels = new Map<string, Point>();
+    for (const id of sel.labels) {
+      const el = lay.edges.find((x) => x.edge.id === id);
+      if (el?.label) origLabels.set(id, { ...el.label.pos });
+    }
+    if (orig.size === 0 && origLabels.size === 0) return false;
+    const origWps = new Map<string, Point[]>();
+    for (const ed of st.diagram.edges) {
+      if (orig.has(ed.from) || orig.has(ed.to)) origWps.set(ed.id, ed.waypoints.map((p) => ({ ...p })));
+    }
+    const guidesX: Guide[] = [];
+    const guidesY: Guide[] = [];
+    const group = { left: Infinity, right: -Infinity, top: Infinity, bottom: -Infinity };
+    const grow = (cx: number, cy: number, w: number, h: number) => {
+      group.left = Math.min(group.left, cx - w / 2);
+      group.right = Math.max(group.right, cx + w / 2);
+      group.top = Math.min(group.top, cy - h / 2);
+      group.bottom = Math.max(group.bottom, cy + h / 2);
+    };
+    for (const b of lay.boxes.values()) {
+      if (orig.has(b.node.id)) grow(b.cx, b.cy, b.w, b.h);
+      else pushGuides(guidesX, guidesY, b.cx, b.cy, b.w, b.h);
+    }
+    for (const el of lay.edges) {
+      if (!el.label) continue;
+      const { pos, layout } = el.label;
+      if (origLabels.has(el.edge.id)) grow(pos.x, pos.y, layout.w, layout.h);
+      else pushGuides(guidesX, guidesY, pos.x, pos.y, layout.w, layout.h, true);
+    }
+    inter.current = { kind: 'dragNodes', start: world, orig, origWps, origLabels, primary, snapGrid, moved: false, guidesX, guidesY, group };
+    return true;
+  };
 
   const fit = useCallback(() => {
     const wrap = wrapRef.current;
@@ -300,8 +386,11 @@ export function Canvas() {
     const st = useStore.getState();
     const world = toWorld(e.clientX, e.clientY);
     const target = e.target as Element;
+    // Alt over a node / label starts a snap-free drag; Alt over empty space pans
+    const onMovable = !!target.closest('[data-node],[data-edge-label],[data-node-label]');
+    const altPan = e.altKey && !onMovable;
 
-    if (e.button === 0 && !spaceDown.current && !e.altKey) {
+    if (e.button === 0 && !spaceDown.current && !altPan) {
       const hit =
         (target.closest('[data-waypoint]') as HTMLElement | null)?.dataset.waypointEdge !== undefined
           ? 'wp:' + (target.closest('[data-waypoint]') as HTMLElement).dataset.waypointEdge + ':' + (target.closest('[data-waypoint]') as HTMLElement).dataset.waypoint
@@ -328,7 +417,7 @@ export function Canvas() {
       }
     }
 
-    if (e.button === 1 || (e.button === 0 && (spaceDown.current || e.altKey))) {
+    if (e.button === 1 || (e.button === 0 && (spaceDown.current || altPan))) {
       autoFit.current = false;
       inter.current = { kind: 'pan', startClient: { x: e.clientX, y: e.clientY }, startView: { ...st.view } };
       svg.setPointerCapture(e.pointerId);
@@ -453,13 +542,14 @@ export function Canvas() {
       return;
     }
 
+    // connection label: a selectable piece of text (Shift adds it to the selection)
     const labelEl = target.closest('[data-edge-label]') as HTMLElement | null;
     if (labelEl) {
       const edgeId = labelEl.dataset.edgeLabel!;
       const el = layoutRef.current.edges.find((x) => x.edge.id === edgeId);
-      st.selectEdge(edgeId);
-      if (el?.label) {
-        inter.current = { kind: 'label', edgeId, mid: el.label.mid, moved: false };
+      if (e.shiftKey) st.selectLabel(edgeId, true);
+      else if (!st.selection.labels.includes(edgeId)) st.selectLabel(edgeId, false);
+      if (el?.label && useStore.getState().selection.labels.includes(edgeId) && beginDrag(world, { ...el.label.pos }, false)) {
         svg.setPointerCapture(e.pointerId);
       }
       return;
@@ -488,35 +578,10 @@ export function Canvas() {
         st.selectNode(id, false);
         selNodes = [id];
       } else if (st.selection.edges.length) {
-        st.setSelection({ nodes: selNodes, edges: [] });
+        st.setSelection({ nodes: selNodes, edges: [], labels: st.selection.labels });
       }
-      const orig = new Map<string, Point>();
-      for (const nid of selNodes) {
-        const n = st.diagram.nodes.find((x) => x.id === nid);
-        if (n) orig.set(nid, { x: n.x, y: n.y });
-      }
-      if (orig.has(id)) {
-        const origWps = new Map<string, Point[]>();
-        for (const ed of st.diagram.edges) {
-          if (orig.has(ed.from) || orig.has(ed.to)) origWps.set(ed.id, ed.waypoints.map((p) => ({ ...p })));
-        }
-        const guidesX: number[] = [];
-        const guidesY: number[] = [];
-        const group = { left: Infinity, right: -Infinity, top: Infinity, bottom: -Infinity };
-        for (const b of layoutRef.current.boxes.values()) {
-          if (orig.has(b.node.id)) {
-            group.left = Math.min(group.left, b.cx - b.w / 2);
-            group.right = Math.max(group.right, b.cx + b.w / 2);
-            group.top = Math.min(group.top, b.cy - b.h / 2);
-            group.bottom = Math.max(group.bottom, b.cy + b.h / 2);
-          } else {
-            guidesX.push(b.cx - b.w / 2, b.cx, b.cx + b.w / 2);
-            guidesY.push(b.cy - b.h / 2, b.cy, b.cy + b.h / 2);
-          }
-        }
-        inter.current = { kind: 'dragNodes', start: world, orig, origWps, primary: id, moved: false, guidesX, guidesY, group };
-        svg.setPointerCapture(e.pointerId);
-      }
+      const n = st.diagram.nodes.find((x) => x.id === id);
+      if (n && selNodes.includes(id) && beginDrag(world, { x: n.x, y: n.y }, true)) svg.setPointerCapture(e.pointerId);
       return;
     }
 
@@ -566,20 +631,32 @@ export function Canvas() {
         const dy = world.y - it.start.y;
         if (!it.moved && Math.hypot(dx, dy) * st.view.zoom < 3) return;
         it.moved = true;
-        const p0 = it.orig.get(it.primary)!;
+        const p0 = it.primary;
+        // Alt: free movement (no grid, no guides) for fine placement
+        const free = e.altKey;
         let ddx = e.shiftKey && Math.abs(dx) <= Math.abs(dy) ? 0 : dx;
         let ddy = e.shiftKey && Math.abs(dx) > Math.abs(dy) ? 0 : dy;
         // smart guides: snap the group's edges/center to other nodes' edges/centers
         const guides: { x?: number; y?: number } = {};
         const gb = it.group;
-        const thr = 6 / st.view.zoom;
-        const bestX = st.snap ? bestGuide([gb.left + ddx, (gb.left + gb.right) / 2 + ddx, gb.right + ddx], it.guidesX, thr) : null;
-        const bestY = st.snap ? bestGuide([gb.top + ddy, (gb.top + gb.bottom) / 2 + ddy, gb.bottom + ddy], it.guidesY, thr) : null;
-        ddx = bestX ? ddx + bestX.diff : snapV(p0.x + ddx) - p0.x;
-        ddy = bestY ? ddy + bestY.diff : snapV(p0.y + ddy) - p0.y;
+        const thr = 5 / st.view.zoom;
+        const near = { x: (gb.left + gb.right) / 2 + ddx, y: (gb.top + gb.bottom) / 2 + ddy };
+        const useGuides = st.snap && !free;
+        const movingShapes = it.orig.size > 0;
+        const bestX = useGuides ? bestGuide([gb.left + ddx, near.x, gb.right + ddx], it.guidesX, thr, near, movingShapes) : null;
+        const bestY = useGuides ? bestGuide([gb.top + ddy, near.y, gb.bottom + ddy], it.guidesY, thr, near, movingShapes) : null;
+        if (bestX) ddx += bestX.diff;
+        else ddx = it.snapGrid ? snapV(p0.x + ddx, free) - p0.x : Math.round(ddx);
+        if (bestY) ddy += bestY.diff;
+        else ddy = it.snapGrid ? snapV(p0.y + ddy, free) - p0.y : Math.round(ddy);
         if (bestX) guides.x = bestX.guide;
         if (bestY) guides.y = bestY.guide;
-        setTransient(bestX || bestY ? { guides } : {});
+        const px = p0.x + ddx;
+        const py = p0.y + ddy;
+        setTransient({
+          guides: bestX || bestY ? guides : undefined,
+          readout: { x: px, y: py, text: `${Math.round(px * 10) / 10}, ${Math.round(py * 10) / 10}` },
+        });
         // Ctrl temporarily inverts the "edges follow" setting
         const follow = st.followEdges !== e.ctrlKey;
         st.liveUpdate((d) => {
@@ -595,6 +672,10 @@ export function Canvas() {
             if (ow) ed.waypoints = ow.map((p) => ({ ...p }));
           }
           if (follow) followEdgesAfterMove(d.edges, new Set(it.orig.keys()), { x: ddx, y: ddy }, it.origWps);
+          // selected labels keep their absolute position + the drag offset, whatever their line did
+          const targets = new Map<string, Point>();
+          for (const [id, o] of it.origLabels) targets.set(id, { x: o.x + ddx, y: o.y + ddy });
+          placeEdgeLabels(d, targets);
         });
         break;
       }
@@ -628,13 +709,37 @@ export function Canvas() {
       case 'waypoint': {
         const first = !it.moved;
         it.moved = true;
-        const p = { x: snapV(world.x), y: snapV(world.y) };
+        const free = e.altKey;
+        let p = { x: snapV(world.x, free), y: snapV(world.y, free) };
         st.liveUpdate((d) => {
           const ed = d.edges.find((x) => x.id === it.edgeId);
           if (!ed) return;
           if (first && it.bake) applyBake(ed, it.bake);
-          if (ed.waypoints[it.index]) ed.waypoints[it.index] = p;
+          if (!ed.waypoints[it.index]) return;
+          if (!free) {
+            // keep the segment to the nearest neighbouring bend at 0 / 30 / 45 / 60 / 90 degrees
+            // (for straight lines the block centers count as neighbours: the line leaves the
+            // block along the center -> bend direction)
+            const neighbours: Point[] = [];
+            const prev = ed.waypoints[it.index - 1];
+            const next = ed.waypoints[it.index + 1];
+            if (prev) neighbours.push(prev);
+            else if (ed.route === 'straight') {
+              const n = d.nodes.find((x) => x.id === ed.from);
+              if (n) neighbours.push({ x: n.x, y: n.y });
+            }
+            if (next) neighbours.push(next);
+            else if (ed.route === 'straight') {
+              const n = d.nodes.find((x) => x.id === ed.to);
+              if (n) neighbours.push({ x: n.x, y: n.y });
+            }
+            let anchor: Point | null = null;
+            for (const q of neighbours) if (!anchor || Math.hypot(q.x - p.x, q.y - p.y) < Math.hypot(anchor.x - p.x, anchor.y - p.y)) anchor = q;
+            if (anchor) p = round1(snapAngleFrom(anchor, p));
+          }
+          ed.waypoints[it.index] = p;
         });
+        setTransient({ readout: { x: p.x, y: p.y, text: `${p.x}, ${p.y}` } });
         break;
       }
       case 'segment': {
@@ -682,15 +787,6 @@ export function Canvas() {
         });
         break;
       }
-      case 'label': {
-        it.moved = true;
-        const off = { x: Math.round(world.x - it.mid.x), y: Math.round(world.y - it.mid.y) };
-        st.liveUpdate((d) => {
-          const ed = d.edges.find((x) => x.id === it.edgeId);
-          if (ed) ed.labelOffset = off;
-        });
-        break;
-      }
       case 'connect': {
         let target: string | null = null;
         let to = world;
@@ -728,16 +824,17 @@ export function Canvas() {
         const y1 = Math.min(it.start.y, world.y);
         const y2 = Math.max(it.start.y, world.y);
         if (x2 - x1 > 2 || y2 - y1 > 2) {
+          const hits = (cx: number, cy: number, w: number, h: number) => cx - w / 2 <= x2 && cx + w / 2 >= x1 && cy - h / 2 <= y2 && cy + h / 2 >= y1;
           const ids: string[] = [];
-          for (const b of layoutRef.current.boxes.values()) {
-            const bx1 = b.cx - b.w / 2;
-            const bx2 = b.cx + b.w / 2;
-            const by1 = b.cy - b.h / 2;
-            const by2 = b.cy + b.h / 2;
-            if (bx1 <= x2 && bx2 >= x1 && by1 <= y2 && by2 >= y1) ids.push(b.node.id);
+          for (const b of layoutRef.current.boxes.values()) if (hits(b.cx, b.cy, b.w, b.h)) ids.push(b.node.id);
+          // connection labels inside the rectangle are selected too (as text that can be aligned)
+          const labelIds: string[] = [];
+          for (const el of layoutRef.current.edges) {
+            if (el.label && hits(el.label.pos.x, el.label.pos.y, el.label.layout.w, el.label.layout.h)) labelIds.push(el.edge.id);
           }
           const prev = it.additive ? st.selection.nodes : [];
-          st.setSelection({ nodes: [...new Set([...prev, ...ids])], edges: [] });
+          const prevLabels = it.additive ? st.selection.labels : [];
+          st.setSelection({ nodes: [...new Set([...prev, ...ids])], edges: [], labels: [...new Set([...prevLabels, ...labelIds])] });
         }
         setTransient({});
         break;
@@ -746,11 +843,13 @@ export function Canvas() {
         setTransient({});
         if (it.moved) st.commit();
         break;
-      case 'resize':
       case 'waypoint':
+        setTransient({});
+        if (it.moved) st.commit();
+        break;
+      case 'resize':
       case 'segment':
       case 'edgeMove':
-      case 'label':
       case 'nodeLabel':
         if (it.moved) st.commit();
         break;
@@ -787,12 +886,15 @@ export function Canvas() {
   const hs = 1 / z; // handle scale
   const bg = s.background && s.background !== 'transparent' && s.background !== 'none' ? s.background : '#ffffff';
 
-  const singleNode = selection.nodes.length === 1 && selection.edges.length === 0 ? selection.nodes[0] : null;
+  const singleNode = selection.nodes.length === 1 && selection.edges.length === 0 && selection.labels.length === 0 ? selection.nodes[0] : null;
   const portNodeIds = new Set<string>();
   if (hoverNode && inter.current.kind !== 'dragNodes') portNodeIds.add(hoverNode);
   if (singleNode) portNodeIds.add(singleNode);
   if (transient.connect?.target) portNodeIds.add(transient.connect.target);
-  const singleEdge = selection.edges.length === 1 && selection.nodes.length === 0 ? layout.edges.find((x) => x.edge.id === selection.edges[0]) : undefined;
+  const singleEdge =
+    selection.edges.length === 1 && selection.nodes.length === 0 && selection.labels.length === 0
+      ? layout.edges.find((x) => x.edge.id === selection.edges[0])
+      : undefined;
 
   // image files dropped onto the canvas become image nodes at the drop point
   const onDragOver = (e: React.DragEvent) => {
@@ -1031,10 +1133,15 @@ export function Canvas() {
         </g>
       </svg>
       {errorCount > 0 && <div className="canvas-error-banner">{t('コードに {n} 件のエラーがあります（該当行は図に反映されません）', { n: errorCount })}</div>}
+      {transient.readout && (
+        <div className="canvas-readout" style={{ left: transient.readout.x * z + view.x + 14, top: transient.readout.y * z + view.y + 14 }}>
+          {transient.readout.text}
+        </div>
+      )}
       <div className="canvas-hint" style={connectMode ? { color: '#1b57a8', background: 'rgba(230,240,253,0.95)', fontWeight: 600 } : undefined}>
         {connectMode
-          ? '接続モード: 始点のブロックから終点のブロックへドラッグ（ポート○に落とすと辺を固定、Esc / C で終了）'
-          : t('ドラッグ: 移動 ・ ポート○ / 「接続」(C): 線を引く ・ 線をダブルクリック: 分岐点を挿入 ・ 線の端点ドラッグ: つなぎ替え ・ 空白ダブルクリック: ブロック追加 ・ 画像はドロップ / Ctrl+V で追加')}
+          ? t('接続モード: 始点のブロックから終点のブロックへドラッグ（ポート○に落とすと辺を固定、Esc / C で終了）')
+          : t('ドラッグ: 移動（Alt: スナップ解除 ・ Shift: 軸固定） ・ ポート○ / 「接続」(C): 線を引く ・ 線をダブルクリック: 分岐点 ・ 空白ダブルクリック: ブロック追加 ・ Ctrl+Shift+A: テキストを全選択')}
       </div>
       <div className="canvas-hud">
         <button className="btn" onClick={() => canvasApi.current?.zoomBy(1 / 1.2)} title={t('縮小')}>
@@ -1048,7 +1155,7 @@ export function Canvas() {
           1:1
         </button>
         <button className="btn" onClick={() => canvasApi.current?.fit()} title={t('全体表示')}>
-          ⤢ 全体
+          {t('⤢ 全体')}
         </button>
       </div>
     </div>

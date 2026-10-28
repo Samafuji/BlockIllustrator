@@ -7,6 +7,7 @@ import {
   DNode,
   Diagram,
   NodeType,
+  Point,
   Side,
   TYPE_PREFIX,
   cloneDiagram,
@@ -15,11 +16,49 @@ import {
 } from '../model/types';
 import { EXAMPLES } from '../examples';
 import { followEdgesAfterMove, polylineLength, polylineMid } from '../geometry/geometry';
-import { layoutDiagram } from '../render/layout';
+import { DiagramLayout, layoutDiagram } from '../render/layout';
 
 export interface SelectionState {
   nodes: string[];
   edges: string[];
+  /** ids of the connections whose *label* is selected (as a movable piece of text) */
+  labels: string[];
+}
+
+/** Something the align / distribute commands can move: a node, or the label of a connection. */
+export interface AlignItem {
+  kind: 'node' | 'label';
+  id: string;
+  cx: number;
+  cy: number;
+  w: number;
+  h: number;
+}
+
+/** Bounding boxes of the given connection labels (labels that do not exist are skipped). */
+export function labelBoxes(lay: DiagramLayout, ids: Iterable<string>): AlignItem[] {
+  const out: AlignItem[] = [];
+  for (const id of ids) {
+    const el = lay.edges.find((x) => x.edge.id === id);
+    if (el?.label) out.push({ kind: 'label', id, cx: el.label.pos.x, cy: el.label.pos.y, w: el.label.layout.w, h: el.label.layout.h });
+  }
+  return out;
+}
+
+/**
+ * Set the `offset` of each connection label so that its center lands on the given
+ * world position. Called after nodes were moved, so a label keeps its absolute
+ * position (or reaches its target) whatever its line did in the meantime.
+ */
+export function placeEdgeLabels(d: Diagram, targets: Map<string, Point>): void {
+  if (targets.size === 0) return;
+  const lay = layoutDiagram(d);
+  for (const el of lay.edges) {
+    const tg = targets.get(el.edge.id);
+    if (!tg || !el.label) continue;
+    const e = d.edges.find((x) => x.id === el.edge.id);
+    if (e) e.labelOffset = { x: Math.round((tg.x - el.label.mid.x) * 10) / 10, y: Math.round((tg.y - el.label.mid.y) * 10) / 10 };
+  }
 }
 
 export interface ViewState {
@@ -87,6 +126,10 @@ export interface StoreState {
   setSelection: (sel: SelectionState) => void;
   selectNode: (id: string, additive?: boolean) => void;
   selectEdge: (id: string) => void;
+  /** select the label of a connection (additive: toggle it in the current selection) */
+  selectLabel: (edgeId: string, additive?: boolean) => void;
+  /** select every piece of free text: text nodes and connection labels */
+  selectAllText: () => void;
   clearSelection: () => void;
   setHover: (id: string | null) => void;
   setView: (v: ViewState) => void;
@@ -240,7 +283,7 @@ export const useStore = create<StoreState>((set, get) => {
     assets: assets0,
     autosaveWarning: null,
     codeVersion: 0,
-    selection: { nodes: [], edges: [] },
+    selection: { nodes: [], edges: [], labels: [] },
     hoverNode: null,
     view: { x: 40, y: 40, zoom: 1 },
     showGrid: true,
@@ -267,7 +310,8 @@ export const useStore = create<StoreState>((set, get) => {
       const sel = get().selection;
       const nodes = sel.nodes.filter((id) => d.nodes.some((n) => n.id === id));
       const edges = sel.edges.filter((id) => d.edges.some((e) => e.id === id));
-      if (nodes.length !== sel.nodes.length || edges.length !== sel.edges.length) set({ selection: { nodes, edges } });
+      const labels = sel.labels.filter((id) => d.edges.some((e) => e.id === id && e.label));
+      if (nodes.length !== sel.nodes.length || edges.length !== sel.edges.length || labels.length !== sel.labels.length) set({ selection: { nodes, edges, labels } });
     },
 
     loadCode(text, file) {
@@ -276,7 +320,7 @@ export const useStore = create<StoreState>((set, get) => {
       scheduleAssetsAutosave(assets);
       applyCode(code, { resetHistory: true });
       set({
-        selection: { nodes: [], edges: [] },
+        selection: { nodes: [], edges: [], labels: [] },
         fileName: file?.name ?? null,
         fileHandle: file?.handle ?? null,
         dirty: false,
@@ -316,7 +360,7 @@ export const useStore = create<StoreState>((set, get) => {
       get().commit((dd) => {
         dd.nodes.push({ id, type: 'image', label: '', x: at.x, y: at.y, w: size.w, h: size.h, src });
       });
-      set({ selection: { nodes: [id], edges: [] } });
+      set({ selection: { nodes: [id], edges: [], labels: [] } });
       return id;
     },
 
@@ -349,7 +393,8 @@ export const useStore = create<StoreState>((set, get) => {
       const sel = get().selection;
       const nodes = sel.nodes.filter((id) => nd.nodes.some((n) => n.id === id));
       const edges = sel.edges.filter((id) => nd.edges.some((e) => e.id === id));
-      set({ selection: { nodes, edges } });
+      const labels = sel.labels.filter((id) => nd.edges.some((e) => e.id === id && e.label));
+      set({ selection: { nodes, edges, labels } });
     },
 
     undo() {
@@ -365,7 +410,7 @@ export const useStore = create<StoreState>((set, get) => {
         codeVersion: st.codeVersion + 1,
         past: st.past.slice(0, -1),
         future: [st.code, ...st.future],
-        selection: { nodes: [], edges: [] },
+        selection: { nodes: [], edges: [], labels: [] },
         dirty: true,
       });
     },
@@ -383,7 +428,7 @@ export const useStore = create<StoreState>((set, get) => {
         codeVersion: st.codeVersion + 1,
         past: [...st.past, st.code],
         future: st.future.slice(1),
-        selection: { nodes: [], edges: [] },
+        selection: { nodes: [], edges: [], labels: [] },
         dirty: true,
       });
     },
@@ -397,17 +442,32 @@ export const useStore = create<StoreState>((set, get) => {
       let nodes: string[];
       if (additive) nodes = sel.nodes.includes(id) ? sel.nodes.filter((n) => n !== id) : [...sel.nodes, id];
       else nodes = [id];
-      const next = { nodes, edges: additive ? sel.edges : [] };
+      const next = { nodes, edges: additive ? sel.edges : [], labels: additive ? sel.labels : [] };
       set({ selection: next });
       revealSelection(get, set, next);
     },
     selectEdge(id) {
-      const next = { nodes: [], edges: [id] };
+      const next = { nodes: [], edges: [id], labels: [] };
       set({ selection: next });
       revealSelection(get, set, next);
     },
+    selectLabel(id, additive) {
+      const sel = get().selection;
+      let labels: string[];
+      if (additive) labels = sel.labels.includes(id) ? sel.labels.filter((n) => n !== id) : [...sel.labels, id];
+      else labels = [id];
+      const next = { nodes: additive ? sel.nodes : [], edges: [], labels };
+      set({ selection: next });
+      revealSelection(get, set, next);
+    },
+    selectAllText() {
+      const d = get().diagram;
+      const nodes = d.nodes.filter((n) => n.type === 'text').map((n) => n.id);
+      const labels = d.edges.filter((e) => e.label).map((e) => e.id);
+      set({ selection: { nodes, edges: [], labels } });
+    },
     clearSelection() {
-      set({ selection: { nodes: [], edges: [] } });
+      set({ selection: { nodes: [], edges: [], labels: [] } });
     },
     setHover(id) {
       if (get().hoverNode !== id) set({ hoverNode: id });
@@ -444,7 +504,7 @@ export const useStore = create<StoreState>((set, get) => {
       get().commit((dd) => {
         dd.nodes.push({ id, type, label, x: at.x, y: at.y });
       });
-      set({ selection: { nodes: [id], edges: [] } });
+      set({ selection: { nodes: [id], edges: [], labels: [] } });
       return id;
     },
 
@@ -456,19 +516,27 @@ export const useStore = create<StoreState>((set, get) => {
       });
       const nd = get().diagram;
       const last = nd.edges[nd.edges.length - 1];
-      if (last) set({ selection: { nodes: [], edges: [last.id] } });
+      if (last) set({ selection: { nodes: [], edges: [last.id], labels: [] } });
     },
 
     deleteSelection() {
       const sel = get().selection;
-      if (sel.nodes.length === 0 && sel.edges.length === 0) return;
+      if (sel.nodes.length === 0 && sel.edges.length === 0 && sel.labels.length === 0) return;
       get().commit((d) => {
         const ns = new Set(sel.nodes);
         const es = new Set(sel.edges);
+        const ls = new Set(sel.labels);
         d.nodes = d.nodes.filter((n) => !ns.has(n.id));
         d.edges = d.edges.filter((e) => !es.has(e.id) && !ns.has(e.from) && !ns.has(e.to));
+        // deleting a selected label removes the text from its line (the line itself stays)
+        for (const e of d.edges) {
+          if (ls.has(e.id)) {
+            delete e.label;
+            delete e.labelOffset;
+          }
+        }
       });
-      set({ selection: { nodes: [], edges: [] } });
+      set({ selection: { nodes: [], edges: [], labels: [] } });
     },
 
     duplicateSelection() {
@@ -495,7 +563,7 @@ export const useStore = create<StoreState>((set, get) => {
           }
         }
       });
-      set({ selection: { nodes: newIds, edges: [] } });
+      set({ selection: { nodes: newIds, edges: [], labels: [] } });
     },
 
     renameNode(oldId, newId) {
@@ -514,7 +582,7 @@ export const useStore = create<StoreState>((set, get) => {
         },
         { renamed: { [newId]: oldId } },
       );
-      set({ selection: { nodes: [newId], edges: [] } });
+      set({ selection: { nodes: [newId], edges: [], labels: [] } });
       return true;
     },
 
@@ -608,7 +676,7 @@ export const useStore = create<StoreState>((set, get) => {
           });
         }
       });
-      set({ selection: { nodes: newIds, edges: [] } });
+      set({ selection: { nodes: newIds, edges: [], labels: [] } });
       return true;
     },
 
@@ -686,83 +754,67 @@ export const useStore = create<StoreState>((set, get) => {
         dd.edges[idx] = e1;
         dd.edges.push(e2);
       });
-      set({ selection: { nodes: [id], edges: [] } });
+      set({ selection: { nodes: [id], edges: [], labels: [] } });
       return id;
     },
 
     alignSelection(mode) {
-      const ids = get().selection.nodes;
-      if (ids.length < 2) return;
-      const lay = layoutDiagram(get().diagram);
-      const boxes = ids.map((id) => lay.boxes.get(id)!).filter(Boolean);
-      const left = Math.min(...boxes.map((b) => b.cx - b.w / 2));
-      const right = Math.max(...boxes.map((b) => b.cx + b.w / 2));
-      const top = Math.min(...boxes.map((b) => b.cy - b.h / 2));
-      const bottom = Math.max(...boxes.map((b) => b.cy + b.h / 2));
+      const items = selectedItems(get);
+      if (items.length < 2) return;
+      const left = Math.min(...items.map((b) => b.cx - b.w / 2));
+      const right = Math.max(...items.map((b) => b.cx + b.w / 2));
+      const top = Math.min(...items.map((b) => b.cy - b.h / 2));
+      const bottom = Math.max(...items.map((b) => b.cy + b.h / 2));
       const hc = (left + right) / 2;
       const vc = (top + bottom) / 2;
-      const follow = get().followEdges;
-      get().commit((d) => {
-        for (const b of boxes) {
-          const n = d.nodes.find((x) => x.id === b.node.id);
-          if (!n) continue;
-          let nx = n.x;
-          let ny = n.y;
-          switch (mode) {
-            case 'left':
-              nx = left + b.w / 2;
-              break;
-            case 'right':
-              nx = right - b.w / 2;
-              break;
-            case 'hcenter':
-              nx = hc;
-              break;
-            case 'top':
-              ny = top + b.h / 2;
-              break;
-            case 'bottom':
-              ny = bottom - b.h / 2;
-              break;
-            case 'vcenter':
-              ny = vc;
-              break;
-          }
-          const delta = { x: nx - n.x, y: ny - n.y };
-          n.x = nx;
-          n.y = ny;
-          if (follow && (delta.x || delta.y)) followEdgesAfterMove(d.edges, new Set([n.id]), delta);
+      const targets = new Map<string, Point>();
+      for (const b of items) {
+        let cx = b.cx;
+        let cy = b.cy;
+        switch (mode) {
+          case 'left':
+            cx = left + b.w / 2;
+            break;
+          case 'right':
+            cx = right - b.w / 2;
+            break;
+          case 'hcenter':
+            cx = hc;
+            break;
+          case 'top':
+            cy = top + b.h / 2;
+            break;
+          case 'bottom':
+            cy = bottom - b.h / 2;
+            break;
+          case 'vcenter':
+            cy = vc;
+            break;
         }
-      });
+        targets.set(b.kind + ':' + b.id, { x: cx, y: cy });
+      }
+      moveItems(get, items, targets);
     },
 
     distributeSelection(axis) {
-      const ids = get().selection.nodes;
-      if (ids.length < 3) return;
-      const lay = layoutDiagram(get().diagram);
-      const boxes = ids.map((id) => lay.boxes.get(id)!).filter(Boolean);
+      const items = selectedItems(get);
+      if (items.length < 3) return;
       // equal gaps between boxes (PowerPoint-style), ordered along the axis
-      const size = (b: (typeof boxes)[number]) => (axis === 'x' ? b.w : b.h);
-      const pos = (b: (typeof boxes)[number]) => (axis === 'x' ? b.cx : b.cy);
-      const sorted = [...boxes].sort((a, b) => pos(a) - pos(b));
+      const size = (b: AlignItem) => (axis === 'x' ? b.w : b.h);
+      const pos = (b: AlignItem) => (axis === 'x' ? b.cx : b.cy);
+      const sorted = [...items].sort((a, b) => pos(a) - pos(b));
       const start = pos(sorted[0]) - size(sorted[0]) / 2;
       const end = pos(sorted[sorted.length - 1]) + size(sorted[sorted.length - 1]) / 2;
       const total = sorted.reduce((a, b) => a + size(b), 0);
       const gap = (end - start - total) / (sorted.length - 1);
-      const follow = get().followEdges;
-      get().commit((d) => {
-        let cursor = start;
-        for (const b of sorted) {
-          const n = d.nodes.find((x) => x.id === b.node.id);
-          if (!n) continue;
-          const target = Math.round((cursor + size(b) / 2) * 10) / 10;
-          const delta = axis === 'x' ? { x: target - n.x, y: 0 } : { x: 0, y: target - n.y };
-          if (axis === 'x') n.x = target;
-          else n.y = target;
-          if (follow && (delta.x || delta.y)) followEdgesAfterMove(d.edges, new Set([n.id]), delta);
-          cursor += size(b) + gap;
-        }
-      });
+      const targets = new Map<string, Point>();
+      let cursor = start;
+      for (const b of sorted) {
+        const target = Math.round((cursor + size(b) / 2) * 10) / 10;
+        targets.set(b.kind + ':' + b.id, axis === 'x' ? { x: target, y: b.cy } : { x: b.cx, y: target });
+        cursor += size(b) + gap;
+      }
+      moveItems(get, items, targets);
     },
 
     sameSizeSelection() {
@@ -784,8 +836,9 @@ export const useStore = create<StoreState>((set, get) => {
 
     nudgeSelection(dx, dy) {
       const sel = get().selection;
-      if (sel.nodes.length === 0 && sel.edges.length === 0) return;
+      if (sel.nodes.length === 0 && sel.edges.length === 0 && sel.labels.length === 0) return;
       const follow = get().followEdges;
+      const labels = labelBoxes(layoutDiagram(get().diagram), sel.labels);
       get().commit((d) => {
         const moved = new Set(sel.nodes);
         for (const n of d.nodes) {
@@ -803,10 +856,47 @@ export const useStore = create<StoreState>((set, get) => {
             }
           }
         }
+        placeEdgeLabels(d, new Map(labels.map((l) => [l.id, { x: l.cx + dx, y: l.cy + dy }])));
       });
     },
   };
 });
+
+/** The selected nodes and connection labels as alignable boxes. */
+function selectedItems(get: () => StoreState): AlignItem[] {
+  const sel = get().selection;
+  const lay = layoutDiagram(get().diagram);
+  const items: AlignItem[] = [];
+  for (const id of sel.nodes) {
+    const b = lay.boxes.get(id);
+    if (b) items.push({ kind: 'node', id, cx: b.cx, cy: b.cy, w: b.w, h: b.h });
+  }
+  items.push(...labelBoxes(lay, sel.labels));
+  return items;
+}
+
+/** Move items to their target centers (keys `kind:id`) in one undo step. */
+function moveItems(get: () => StoreState, items: AlignItem[], targets: Map<string, Point>): void {
+  const follow = get().followEdges;
+  get().commit((d) => {
+    const labelTargets = new Map<string, Point>();
+    for (const b of items) {
+      const tg = targets.get(b.kind + ':' + b.id);
+      if (!tg) continue;
+      if (b.kind === 'label') {
+        labelTargets.set(b.id, tg);
+        continue;
+      }
+      const n = d.nodes.find((x) => x.id === b.id);
+      if (!n) continue;
+      const delta = { x: tg.x - n.x, y: tg.y - n.y };
+      n.x = tg.x;
+      n.y = tg.y;
+      if (follow && (delta.x || delta.y)) followEdgesAfterMove(d.edges, new Set([n.id]), delta);
+    }
+    placeEdgeLabels(d, labelTargets);
+  });
+}
 
 function revealSelection(get: () => StoreState, set: (p: Partial<StoreState>) => void, sel: SelectionState) {
   const p = get().parse;

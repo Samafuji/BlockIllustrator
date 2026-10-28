@@ -99,11 +99,11 @@ export const exportActions = {
   copyPng: (scale: number) =>
     guard(async () => {
       await copyPngToClipboard(useStore.getState().diagram, scale);
-      toast('PNG をクリップボードにコピーしました');
+      toast(t('PNG をクリップボードにコピーしました'));
     }),
   copySvg: () =>
     guard(async () => {
       await copySvgToClipboard(useStore.getState().diagram);
-      toast('SVG をクリップボードにコピーしました');
+      toast(t('SVG をクリップボードにコピーしました'));
     }),
 };

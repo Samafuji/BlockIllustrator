@@ -6,6 +6,7 @@ import {
   DEdge,
   DNode,
   DStyle,
+  Diagram,
   LABEL_POSITIONS,
   LabelPos,
   NODE_TYPES,
@@ -321,9 +322,12 @@ const FONT_PRESETS: { value: string; label: string }[] = [
 
 const HELP_ITEMS: string[] = [
   'ノードをドラッグで移動、角のハンドルでサイズ変更',
+  'Alt を押しながらドラッグするとグリッド・整列ガイド・角度のスナップを一時的に解除して自由に動かせます。矢印キーで 1px、Shift+矢印でグリッド単位の微調整',
   'ノード上の青い○ (ポート) から別ノードへドラッグで接続。または「接続」モード (C)',
   '線を選択 → ▬ で区間移動、■ で曲がり角移動、○ で曲がり角追加。線をダブルクリックで分岐点',
-  '線ラベルはドラッグで位置調整',
+  '直線 (straight) の線と曲がり角の区間は 0 / 30 / 45 / 60 / 90° に自動で揃います（Alt で解除）',
+  '線ラベルはドラッグで位置調整。クリックで選択、Shift+クリック / 範囲選択でテキストノードと一緒に複数選択して整列できます',
+  'Ctrl+Shift+A でテキスト（テキストノード・線ラベル）をすべて選択',
   '空白ダブルクリックでブロック追加',
   'Shift+クリック / 範囲ドラッグで複数選択。整列はツールバーまたは Alt+A/H/D/W/V/S',
   'ホイール: スクロール / Ctrl+ホイール: ズーム / Space+ドラッグ・中ボタン: パン',
@@ -380,7 +384,7 @@ function NodeInspector({ node }: { node: DNode }) {
         mono
         onCommit={(v) => {
           if (!useStore.getState().renameNode(node.id, v)) {
-            window.alert('ID は英字で始まる英数字・_ のみ、かつ重複不可です');
+            window.alert(t('ID は英字で始まる英数字・_ のみ、かつ重複不可です'));
           }
         }}
       />
@@ -441,7 +445,7 @@ function NodeInspector({ node }: { node: DNode }) {
       {node.type === 'gain' && (
         <label className="check">
           <input type="checkbox" checked={!!node.flip} onChange={(e) => upd({ flip: e.target.checked || undefined })} />
-          左向き (flip)
+          {t('左向き (flip)')}
         </label>
       )}
       {node.type === 'junction' && (
@@ -493,21 +497,19 @@ function NodeInspector({ node }: { node: DNode }) {
       <NumField label={t('文字サイズ')} value={node.fontSize} placeholder={String(rs.fontSize)} min={1} onCommit={(v) => upd({ fontSize: v })} />
       <div className="btn-row">
         <button className="btn" onClick={() => useStore.getState().duplicateSelection()}>
-          複製
+          {t('複製')}
         </button>
         <button
           className="btn"
           onClick={() => upd({ fill: undefined, stroke: undefined, color: undefined, fontSize: undefined, strokeWidth: undefined, radius: undefined })}
         >
-          個別スタイルを解除
+          {t('個別スタイルを解除')}
         </button>
         <button className="btn danger" onClick={() => useStore.getState().deleteSelection()}>
           {t('削除')}
         </button>
       </div>
-      <p className="muted">
-        接続を作るには、ノードにカーソルを合わせて現れる青い○（ポート）から別のノードへドラッグします。
-      </p>
+      <p className="muted">{t('接続を作るには、ノードにカーソルを合わせて現れる青い○（ポート）から別のノードへドラッグします。')}</p>
     </div>
   );
 }
@@ -555,7 +557,7 @@ function EdgeInspector({ edge }: { edge: DEdge }) {
             upd({ from: edge.to, to: edge.from, fromSide: edge.toSide, toSide: edge.fromSide, waypoints: [...edge.waypoints].reverse() })
           }
         >
-          ⇄ 向きを反転
+          {t('⇄ 向きを反転')}
         </button>
       </div>
       <h3>{t('ラベル')}</h3>
@@ -563,7 +565,7 @@ function EdgeInspector({ edge }: { edge: DEdge }) {
       {edge.labelOffset && (
         <div className="btn-row">
           <button className="btn" onClick={() => upd({ labelOffset: undefined })}>
-            ラベル位置をリセット
+            {t('ラベル位置をリセット')}
           </button>
         </div>
       )}
@@ -630,7 +632,7 @@ function EdgeInspector({ edge }: { edge: DEdge }) {
           ))}
           <div className="btn-row">
             <button className="btn" onClick={() => upd({ waypoints: [] })}>
-              経由点をすべて削除 (自動配線に戻す)
+              {t('経由点をすべて削除 (自動配線に戻す)')}
             </button>
           </div>
         </>
@@ -643,10 +645,10 @@ function EdgeInspector({ edge }: { edge: DEdge }) {
           onClick={() => useStore.getState().insertJunctionOnEdge(edge.id)}
           title={t('この線の中央に分岐点を挿入して 2 本に分けます（線をダブルクリックすると好きな位置に挿入できます）')}
         >
-          ● 分岐点を挿入
+          {t('● 分岐点を挿入')}
         </button>
         <button className="btn danger" onClick={() => useStore.getState().deleteSelection()}>
-          接続線を削除
+          {t('接続線を削除')}
         </button>
       </div>
     </div>
@@ -655,65 +657,80 @@ function EdgeInspector({ edge }: { edge: DEdge }) {
 
 // ---------------------------------------------------------------- multi
 
-function MultiInspector({ ids }: { ids: string[] }) {
+function MultiInspector({ ids, labelIds }: { ids: string[]; labelIds: string[] }) {
   const t = useT();
-  const diagram = useStore((s) => s.diagram);
   const align = (mode: AlignMode) => useStore.getState().alignSelection(mode);
   const distribute = (axis: 'x' | 'y') => useStore.getState().distributeSelection(axis);
   const sameSize = () => useStore.getState().sameSizeSelection();
+  const total = ids.length + labelIds.length;
+  // bulk style: nodes take every field; selected line labels take the font size
   const setAll = (patch: Partial<DNode>, live?: boolean) => {
-    const fn = (d: DNode['type'] extends never ? never : any) => {
+    const fn = (d: Diagram) => {
       for (const n of d.nodes) if (ids.includes(n.id)) Object.assign(n, patch);
+      if (patch.fontSize !== undefined || 'fontSize' in patch) {
+        for (const e of d.edges) {
+          if (!labelIds.includes(e.id)) continue;
+          if (patch.fontSize === undefined) delete e.fontSize;
+          else e.fontSize = patch.fontSize;
+        }
+      }
     };
     if (live) useStore.getState().liveUpdate(fn);
     else useStore.getState().commit(fn);
   };
   return (
     <div className="inspector">
-      <h3>{t('{n} 個のノードを選択中', { n: ids.length })}</h3>
+      <h3>{labelIds.length > 0 ? t('{n} 個を選択中（ノード {a}・線ラベル {b}）', { n: total, a: ids.length, b: labelIds.length }) : t('{n} 個のノードを選択中', { n: total })}</h3>
       <div className="muted">{t('整列')}</div>
       <div className="btn-row">
         <button className="btn" onClick={() => align('left')}>
-          左揃え
+          {t('左揃え')}
         </button>
         <button className="btn" onClick={() => align('hcenter')}>
-          左右中央
+          {t('左右中央')}
         </button>
         <button className="btn" onClick={() => align('right')}>
-          右揃え
+          {t('右揃え')}
         </button>
         <button className="btn" onClick={() => align('top')}>
-          上揃え
+          {t('上揃え')}
         </button>
         <button className="btn" onClick={() => align('vcenter')}>
-          上下中央
+          {t('上下中央')}
         </button>
         <button className="btn" onClick={() => align('bottom')}>
-          下揃え
+          {t('下揃え')}
         </button>
       </div>
       <div className="muted">{t('等間隔配置 / サイズ')}</div>
       <div className="btn-row">
-        <button className="btn" onClick={() => distribute('x')} disabled={ids.length < 3}>
-          横に等間隔
+        <button className="btn" onClick={() => distribute('x')} disabled={total < 3}>
+          {t('横に等間隔')}
         </button>
-        <button className="btn" onClick={() => distribute('y')} disabled={ids.length < 3}>
-          縦に等間隔
+        <button className="btn" onClick={() => distribute('y')} disabled={total < 3}>
+          {t('縦に等間隔')}
         </button>
-        <button className="btn" onClick={sameSize}>
-          サイズを揃える
+        <button className="btn" onClick={sameSize} disabled={ids.length < 2}>
+          {t('サイズを揃える')}
         </button>
       </div>
+      {labelIds.length > 0 && <p className="muted">{t('線ラベルは位置 (offset) を変えて揃えます。ドラッグでまとめて動かすこともできます。')}</p>}
       <h3>{t('一括スタイル')}</h3>
-      <ColorField label={t('塗り')} value={undefined} onLive={(v) => setAll({ fill: v }, true)} onCommit={(v) => setAll({ fill: v })} allowNone />
-      <ColorField label={t('枠線')} value={undefined} onLive={(v) => setAll({ stroke: v }, true)} onCommit={(v) => setAll({ stroke: v })} />
-      <ColorField label={t('文字色')} value={undefined} onLive={(v) => setAll({ color: v }, true)} onCommit={(v) => setAll({ color: v })} />
+      {ids.length > 0 && (
+        <>
+          <ColorField label={t('塗り')} value={undefined} onLive={(v) => setAll({ fill: v }, true)} onCommit={(v) => setAll({ fill: v })} allowNone />
+          <ColorField label={t('枠線')} value={undefined} onLive={(v) => setAll({ stroke: v }, true)} onCommit={(v) => setAll({ stroke: v })} />
+          <ColorField label={t('文字色')} value={undefined} onLive={(v) => setAll({ color: v }, true)} onCommit={(v) => setAll({ color: v })} />
+        </>
+      )}
       <NumField label={t('文字サイズ')} value={undefined} onCommit={(v) => setAll({ fontSize: v })} />
       <div className="btn-row">
-        <button className="btn" onClick={() => useStore.getState().duplicateSelection()}>
-          複製
-        </button>
-        <button className="btn danger" onClick={() => useStore.getState().deleteSelection()}>
+        {ids.length > 0 && (
+          <button className="btn" onClick={() => useStore.getState().duplicateSelection()}>
+            {t('複製')}
+          </button>
+        )}
+        <button className="btn danger" onClick={() => useStore.getState().deleteSelection()} title={labelIds.length > 0 ? t('選択した線ラベルは文字が消えます（線は残ります）') : undefined}>
           {t('削除')}
         </button>
       </div>
@@ -763,7 +780,7 @@ function StylePanel() {
       <SelectField
         label={t('フォント')}
         value={FONT_PRESETS.some((f) => f.value === style.font) ? style.font : 'custom'}
-        options={[...FONT_PRESETS, { value: 'custom', label: t('カスタム…') }]}
+        options={[...FONT_PRESETS.map((f) => ({ value: f.value, label: t(f.label) })), { value: 'custom', label: t('カスタム…') }]}
         onCommit={(v) => {
           if (v !== 'custom') upd({ font: v });
         }}
@@ -858,10 +875,10 @@ function StylePanel() {
       <NumField label={t('グリッド間隔')} value={style.grid} min={1} onCommit={(v) => upd({ grid: v ?? DEFAULT_STYLE.grid })} />
       <div className="btn-row">
         <button className="btn" onClick={clearOverrides} title={t('ノード・線の個別スタイル (色・太さ・文字サイズ) をすべて解除し、全体スタイルに統一します')}>
-          個別スタイルをすべて解除
+          {t('個別スタイルをすべて解除')}
         </button>
         <button className="btn" onClick={resetSizes} title={t('ブロックの個別サイズを解除して既定サイズに統一します')}>
-          サイズを既定に統一
+          {t('サイズを既定に統一')}
         </button>
       </div>
       <h3>{t('操作ガイド')}</h3>
@@ -879,14 +896,16 @@ function StylePanel() {
 export function Inspector() {
   const sel = useStore((s) => s.selection);
   const diagram = useStore((s) => s.diagram);
-  if (sel.nodes.length === 1 && sel.edges.length === 0) {
+  if (sel.nodes.length === 1 && sel.edges.length === 0 && sel.labels.length === 0) {
     const node = diagram.nodes.find((n) => n.id === sel.nodes[0]);
     if (node) return <NodeInspector key={node.id} node={node} />;
   }
-  if (sel.edges.length === 1 && sel.nodes.length === 0) {
-    const edge = diagram.edges.find((e) => e.id === sel.edges[0]);
+  // a single connection, or the label of a single connection: edit that connection
+  const edgeId = sel.nodes.length === 0 && sel.edges.length + sel.labels.length === 1 ? sel.edges[0] ?? sel.labels[0] : undefined;
+  if (edgeId) {
+    const edge = diagram.edges.find((e) => e.id === edgeId);
     if (edge) return <EdgeInspector key={edge.id} edge={edge} />;
   }
-  if (sel.nodes.length > 1) return <MultiInspector ids={sel.nodes} />;
+  if (sel.nodes.length + sel.labels.length > 1) return <MultiInspector ids={sel.nodes} labelIds={sel.labels} />;
   return <StylePanel />;
 }

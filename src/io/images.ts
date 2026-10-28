@@ -110,7 +110,7 @@ export async function importImageFiles(files: File[] | FileList, at?: Point): Pr
     ids.push(useStore.getState().addImageNode(name, { x, y }, size));
     k++;
   }
-  if (ids.length) useStore.getState().setSelection({ nodes: ids, edges: [] });
+  if (ids.length) useStore.getState().setSelection({ nodes: ids, edges: [], labels: [] });
   canvasApi.current?.focus();
   return ids;
 }

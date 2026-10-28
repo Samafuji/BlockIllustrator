@@ -157,9 +157,14 @@ export function routeEdge(e: DEdge, from: Box, to: Box): RoutedEdge {
   let toSide: Side | undefined;
   if (e.route === 'straight') {
     const wps = e.waypoints;
-    const a = anchorToward(from, wps[0] ?? { x: to.cx, y: to.cy });
-    const b = anchorToward(to, wps[wps.length - 1] ?? { x: from.cx, y: from.cy });
-    points = dedupe([a, ...wps, b]);
+    const snapped = wps.length === 0 ? straightSnapped(from, to) : null;
+    if (snapped) {
+      points = snapped;
+    } else {
+      const a = anchorToward(from, wps[0] ?? { x: to.cx, y: to.cy });
+      const b = anchorToward(to, wps[wps.length - 1] ?? { x: from.cx, y: from.cy });
+      points = dedupe([a, ...wps, b]);
+    }
   } else if (e.waypoints.length > 0) {
     const wps = e.waypoints;
     const fs = e.fromSide ?? sideToward(from, wps[0]);
@@ -222,11 +227,17 @@ function autoRoute(e: DEdge, from: Box, to: Box): { points: Point[]; fs: Side; t
   let b = b0;
   if (isHorizontal(fs) && isHorizontal(tsd)) {
     if (Math.abs(a0.y - b0.y) <= 1) return { points: [a, b], fs, ts: tsd };
+    // nearly aligned blocks: slide both anchors to a common y so the line is perfectly
+    // horizontal instead of a tiny jog / slight slope
+    const y = commonCoordinate(a0.y, b0.y, slideHalf(from, 'y'), slideHalf(to, 'y'));
+    if (y !== null) return { points: [anchorOnSide(from, fs, y), anchorOnSide(to, tsd, y)], fs, ts: tsd };
     const mx = (a.x + b.x) / 2;
     return { points: dedupe([a, { x: mx, y: a.y }, { x: mx, y: b.y }, b]), fs, ts: tsd };
   }
   if (!isHorizontal(fs) && !isHorizontal(tsd)) {
     if (Math.abs(a0.x - b0.x) <= 1) return { points: [a, b], fs, ts: tsd };
+    const x = commonCoordinate(a0.x, b0.x, slideHalf(from, 'x'), slideHalf(to, 'x'));
+    if (x !== null) return { points: [anchorOnSide(from, fs, x), anchorOnSide(to, tsd, x)], fs, ts: tsd };
     const my = (a.y + b.y) / 2;
     return { points: dedupe([a, { x: a.x, y: my }, { x: b.x, y: my }, b]), fs, ts: tsd };
   }
@@ -284,6 +295,120 @@ export function followEdgesAfterMove(
     if (a && b) e.waypoints = wps.map((p) => ({ x: p.x + delta.x, y: p.y + delta.y }));
     else e.waypoints = followWaypoints(wps, delta, a);
   }
+}
+
+/** How far an anchor can slide along a side (0 for shapes whose anchors are fixed at the side center). */
+function slideHalf(b: Box, axis: 'x' | 'y'): number {
+  const t = b.node.type;
+  if (t === 'sum' || t === 'junction' || t === 'circle' || t === 'diamond' || t === 'gain') return 0;
+  return Math.max(0, (axis === 'y' ? b.h : b.w) / 2 - 6);
+}
+
+/** A coordinate both anchors can share (null when the shapes are too far apart to slide). */
+function commonCoordinate(va: number, vb: number, ra: number, rb: number): number | null {
+  const diff = Math.abs(va - vb);
+  if (ra === 0 && rb === 0) return null;
+  if (ra === 0) return diff <= rb ? va : null;
+  if (rb === 0) return diff <= ra ? vb : null;
+  const mid = (va + vb) / 2;
+  return Math.abs(mid - va) <= ra && Math.abs(mid - vb) <= rb ? mid : null;
+}
+
+/** Allowed angles for straight connections and bends (degrees): multiples of 30 and 45. */
+export const SNAP_ANGLES = [0, 30, 45, 60, 90, 120, 135, 150, 180, -30, -45, -60, -90, -120, -135, -150];
+
+/** The allowed angle (degrees) closest to the direction `deg`, and how far off it is. */
+export function nearestSnapAngle(deg: number): { angle: number; diff: number } {
+  let best = SNAP_ANGLES[0];
+  let bestDiff = Infinity;
+  for (const a of SNAP_ANGLES) {
+    const diff = Math.abs(((deg - a + 540) % 360) - 180);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      best = a;
+    }
+  }
+  return { angle: best, diff: bestDiff };
+}
+
+/**
+ * Project `p` onto the ray from `origin` whose direction is the allowed angle closest
+ * to origin->p, so the segment between them is at 0 / 30 / 45 / 60 / 90 degrees.
+ */
+export function snapAngleFrom(origin: Point, p: Point): Point {
+  const dx = p.x - origin.x;
+  const dy = p.y - origin.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-6) return p;
+  const { angle, diff } = nearestSnapAngle((Math.atan2(dy, dx) * 180) / Math.PI);
+  if (diff < 1e-6) return p;
+  const rad = (angle * Math.PI) / 180;
+  const u = { x: Math.cos(rad), y: Math.sin(rad) };
+  const along = dx * u.x + dy * u.y;
+  return { x: origin.x + u.x * along, y: origin.y + u.y * along };
+}
+
+/** Where a ray from `p` in direction `d` first enters the box (t > 0), or null. */
+function rayEnter(b: Box, p: Point, d: Point): Point | null {
+  const t = b.node.type;
+  if (t === 'sum' || t === 'junction' || t === 'circle') {
+    // ellipse: solve |((p + t d) - c) / r|^2 = 1
+    const rx = Math.max(b.w / 2, 0.01);
+    const ry = Math.max(b.h / 2, 0.01);
+    const px = (p.x - b.cx) / rx;
+    const py = (p.y - b.cy) / ry;
+    const dx = d.x / rx;
+    const dy = d.y / ry;
+    const A = dx * dx + dy * dy;
+    const B = 2 * (px * dx + py * dy);
+    const C = px * px + py * py - 1;
+    const disc = B * B - 4 * A * C;
+    if (disc < 0 || A === 0) return null;
+    const tt = (-B - Math.sqrt(disc)) / (2 * A);
+    if (tt <= 0) return null;
+    return { x: p.x + d.x * tt, y: p.y + d.y * tt };
+  }
+  // axis-aligned box (slab method)
+  let tmin = -Infinity;
+  let tmax = Infinity;
+  for (const [pc, dc, lo, hi] of [
+    [p.x, d.x, b.cx - b.w / 2, b.cx + b.w / 2],
+    [p.y, d.y, b.cy - b.h / 2, b.cy + b.h / 2],
+  ] as [number, number, number, number][]) {
+    if (Math.abs(dc) < 1e-9) {
+      if (pc < lo || pc > hi) return null;
+      continue;
+    }
+    let t1 = (lo - pc) / dc;
+    let t2 = (hi - pc) / dc;
+    if (t1 > t2) [t1, t2] = [t2, t1];
+    tmin = Math.max(tmin, t1);
+    tmax = Math.min(tmax, t2);
+  }
+  if (tmax < tmin || tmin <= 0) return null;
+  return { x: p.x + d.x * tmin, y: p.y + d.y * tmin };
+}
+
+/**
+ * Straight connection snapped to 0 / 30 / 45 / 60 / 90 degrees: the line keeps the
+ * snapped angle through the midpoint between the two shapes, and the end points are
+ * where that line meets each shape. Returns null when the centers are already on an
+ * allowed angle or the snapped line would miss a shape (the caller then draws the
+ * plain center-to-center line).
+ */
+function straightSnapped(from: Box, to: Box): Point[] | null {
+  const dx = to.cx - from.cx;
+  const dy = to.cy - from.cy;
+  if (Math.hypot(dx, dy) < 1) return null;
+  const { angle: best, diff: bestDiff } = nearestSnapAngle((Math.atan2(dy, dx) * 180) / Math.PI);
+  if (bestDiff < 0.01) return null;
+  const rad = (best * Math.PI) / 180;
+  const u = { x: Math.cos(rad), y: Math.sin(rad) };
+  const m = { x: (from.cx + to.cx) / 2, y: (from.cy + to.cy) / 2 };
+  const a = rayEnter(from, m, { x: -u.x, y: -u.y });
+  const b = rayEnter(to, m, u);
+  if (!a || !b) return null;
+  return [a, b];
 }
 
 export function polylineLength(pts: Point[]): number {

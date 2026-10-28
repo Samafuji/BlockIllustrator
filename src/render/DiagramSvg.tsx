@@ -7,6 +7,8 @@ import { DiagramLayout, EdgeLayout, junctionDotVisible, nodeLabelPos } from './l
 export interface Selection {
   nodes: Set<string>;
   edges: Set<string>;
+  /** connections whose label is selected as a piece of text */
+  labels: Set<string>;
 }
 
 export interface DiagramSvgProps {
@@ -211,7 +213,19 @@ function pathD(points: Point[]): string {
   return points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x} ${p.y}`).join(' ');
 }
 
-function EdgeShape({ el, style, selected, edit }: { el: EdgeLayout; style: DStyle; selected: boolean; edit: boolean }) {
+function EdgeShape({
+  el,
+  style,
+  selected,
+  labelSelected,
+  edit,
+}: {
+  el: EdgeLayout;
+  style: DStyle;
+  selected: boolean;
+  labelSelected: boolean;
+  edit: boolean;
+}) {
   const e = el.edge;
   const color = e.color ?? style.lineColor;
   const lw = e.width ?? style.lineWidth;
@@ -251,9 +265,9 @@ function EdgeShape({ el, style, selected, edit }: { el: EdgeLayout; style: DStyl
           width={el.label.layout.w + 6}
           height={el.label.layout.h + 4}
           fill="transparent"
-          stroke={selected ? SEL_COLOR : 'none'}
-          strokeDasharray="2 2"
-          strokeWidth={1}
+          stroke={selected || labelSelected ? SEL_COLOR : 'none'}
+          strokeDasharray={labelSelected ? undefined : '2 2'}
+          strokeWidth={labelSelected ? 1.5 : 1}
           data-edge-label={e.id}
           style={{ cursor: 'move' }}
           vectorEffect="non-scaling-stroke"
@@ -275,7 +289,14 @@ export function DiagramContent({ layout, mode, selection, hoverNode }: DiagramSv
     <>
       <g className="edges">
         {edges.map((el) => (
-          <EdgeShape key={el.edge.id} el={el} style={s} selected={!!selection?.edges.has(el.edge.id)} edit={edit} />
+          <EdgeShape
+            key={el.edge.id}
+            el={el}
+            style={s}
+            selected={!!selection?.edges.has(el.edge.id)}
+            labelSelected={!!selection?.labels.has(el.edge.id)}
+            edit={edit}
+          />
         ))}
       </g>
       <g className="nodes">
@@ -290,8 +311,11 @@ export function DiagramContent({ layout, mode, selection, hoverNode }: DiagramSv
               {(n.label !== '' || n.type === 'sum') && (
                 <LabelSvg layout={lay} x={lp.x} y={lp.y} color={n.color ?? s.textColor} />
               )}
-              {edit && selected && n.label !== '' && (
-                // drag handle for the label of the selected node (moves the label, not the node)
+              {edit && selected && n.label !== '' && n.type !== 'text' && resolveNode(n, s).labelPos !== 'center' && (
+                // drag handle for the label of a selected node whose label sits outside the shape
+                // (captions): it moves the label, not the node. Labels inside a shape are not
+                // draggable on their own, so grabbing a selected block at its text still moves
+                // the block; a text node *is* its label and moves as a node.
                 <rect
                   x={lp.x - lay.w / 2 - 3}
                   y={lp.y - lay.h / 2 - 2}
