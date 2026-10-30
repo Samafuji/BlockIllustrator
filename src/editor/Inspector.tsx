@@ -6,20 +6,25 @@ import {
   DEdge,
   DNode,
   DStyle,
-  Diagram,
   LABEL_POSITIONS,
   LabelPos,
   NODE_TYPES,
   NodeType,
+  ROTATIONS,
   SIDES,
   Side,
+  TEXT_ALIGNS,
+  TextAlign,
   edgeTextDefaults,
   nodeSize,
+  resolveEdgeText,
   resolveNode,
 } from '../model/types';
-import { AlignMode, useStore } from '../store/useStore';
-import { layoutDiagram } from '../render/layout';
+import { AlignMode, MatchWhat, referenceNodeId, useStore } from '../store/useStore';
 import { fitNodeToImage, replaceNodeImage } from '../io/images';
+import { ColorPopoverButton, toHex } from './ColorPicker';
+import { FONT_PRESETS } from './fonts';
+import { IcBold, IcItalic, IcTextCenter, IcTextLeft, IcTextRight, IcUnderline } from './icons';
 
 // ---------------------------------------------------------------- fields
 
@@ -76,6 +81,183 @@ export function TextField({
       <label>{label}</label>
       {multiline ? <textarea {...common} /> : <input type="text" {...common} />}
     </div>
+  );
+}
+
+/** Wrap the selected part of a textarea's text in a markup tag (or insert an empty pair). */
+function wrapSelection(el: HTMLTextAreaElement, open: string, close: string): string {
+  const v = el.value;
+  const a = el.selectionStart ?? v.length;
+  const b = el.selectionEnd ?? a;
+  const inner = v.slice(a, b);
+  const next = v.slice(0, a) + open + inner + close + v.slice(b);
+  window.setTimeout(() => {
+    el.focus();
+    el.setSelectionRange(a + open.length, a + open.length + inner.length);
+  }, 0);
+  return next;
+}
+
+/**
+ * Multi-line label editor with buttons that format only the selected part of the
+ * text (inline tags: <b> <i> <u> <small> <big> <color #hex>). Whole-label style
+ * (bold for everything) is set on the node instead.
+ */
+export function MarkupTextField({
+  label,
+  value,
+  onCommit,
+  placeholder,
+  focusKey,
+}: {
+  label: string;
+  value: string;
+  onCommit: (v: string) => void;
+  placeholder?: string;
+  focusKey?: number;
+}) {
+  const t = useT();
+  const [v, setV] = useState(value);
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => setV(value), [value]);
+  useEffect(() => {
+    if (focusKey) {
+      ref.current?.focus();
+      ref.current?.select();
+    }
+  }, [focusKey]);
+  const commit = () => {
+    if (v !== value) onCommit(v);
+  };
+  const wrap = (open: string, close: string) => {
+    const el = ref.current;
+    if (!el) return;
+    const next = wrapSelection(el, open, close);
+    setV(next);
+    onCommit(next);
+  };
+  return (
+    <div className="field">
+      <label>{label}</label>
+      <div>
+        <div className="markup-tools" title={t('文字の一部を選択してから押すと、その部分だけに適用されます')}>
+          <button type="button" className="btn icon" title={t('選択部分を太字')} onMouseDown={(e) => e.preventDefault()} onClick={() => wrap('<b>', '</b>')}>
+            <IcBold size={14} />
+          </button>
+          <button type="button" className="btn icon" title={t('選択部分を斜体')} onMouseDown={(e) => e.preventDefault()} onClick={() => wrap('<i>', '</i>')}>
+            <IcItalic size={14} />
+          </button>
+          <button type="button" className="btn icon" title={t('選択部分に下線')} onMouseDown={(e) => e.preventDefault()} onClick={() => wrap('<u>', '</u>')}>
+            <IcUnderline size={14} />
+          </button>
+          <button type="button" className="btn icon txt" title={t('選択部分を小さく')} onMouseDown={(e) => e.preventDefault()} onClick={() => wrap('<small>', '</small>')}>
+            <small>A</small>
+          </button>
+          <button type="button" className="btn icon txt" title={t('選択部分を大きく')} onMouseDown={(e) => e.preventDefault()} onClick={() => wrap('<big>', '</big>')}>
+            A
+          </button>
+          <ColorPopoverButton title={t('選択部分の色')} onPick={(c) => wrap(`<color ${c ?? '#000000'}>`, '</color>')}>
+            <span className="txt">A</span>
+            <span className="swatch-cur" style={{ background: 'linear-gradient(90deg,#d0353c,#f1c40f,#27ae60,#2b7de9)' }} />
+          </ColorPopoverButton>
+          <button type="button" className="btn icon txt" title={t('数式 $...$')} onMouseDown={(e) => e.preventDefault()} onClick={() => wrap('$', '$')}>
+            ∑
+          </button>
+        </div>
+        <textarea
+          ref={ref}
+          value={v}
+          placeholder={placeholder}
+          onChange={(e) => setV(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && e.ctrlKey) {
+              e.preventDefault();
+              commit();
+              (e.target as HTMLElement).blur();
+            }
+            if (e.key === 'Escape') {
+              setV(value);
+              (e.target as HTMLElement).blur();
+            }
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+/** Bold / italic / underline toggles and line alignment for a node or a line label. */
+function TextStyleRow({
+  bold,
+  italic,
+  underline,
+  align,
+  onToggle,
+  onAlign,
+}: {
+  bold: boolean;
+  italic: boolean;
+  underline?: boolean;
+  align: TextAlign;
+  onToggle: (k: 'bold' | 'italic' | 'underline') => void;
+  onAlign: (a: TextAlign) => void;
+}) {
+  const t = useT();
+  return (
+    <div className="field">
+      <label>{t('文字スタイル')}</label>
+      <div className="row">
+        <div className="btn-group">
+          <button type="button" className={'btn icon' + (bold ? ' active' : '')} title={t('太字') + ' (Ctrl+B)'} onClick={() => onToggle('bold')}>
+            <IcBold />
+          </button>
+          <button type="button" className={'btn icon' + (italic ? ' active' : '')} title={t('斜体') + ' (Ctrl+I)'} onClick={() => onToggle('italic')}>
+            <IcItalic />
+          </button>
+          {underline !== undefined && (
+            <button type="button" className={'btn icon' + (underline ? ' active' : '')} title={t('下線') + ' (Ctrl+U)'} onClick={() => onToggle('underline')}>
+              <IcUnderline />
+            </button>
+          )}
+        </div>
+        <div className="btn-group">
+          {TEXT_ALIGNS.map((a) => (
+            <button
+              key={a}
+              type="button"
+              className={'btn icon' + (align === a ? ' active' : '')}
+              title={a === 'left' ? t('文字を左揃え') : a === 'center' ? t('文字を中央揃え') : t('文字を右揃え')}
+              onClick={() => onAlign(a)}
+            >
+              {a === 'left' ? <IcTextLeft /> : a === 'center' ? <IcTextCenter /> : <IcTextRight />}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FontSelect({ value, placeholder, onCommit }: { value: string | undefined; placeholder: string; onCommit: (v: string | undefined) => void }) {
+  const t = useT();
+  const cur = value ?? 'default';
+  const known = cur === 'default' || FONT_PRESETS.some((f) => f.value === cur);
+  const base = FONT_PRESETS.find((f) => f.value === placeholder);
+  return (
+    <SelectField
+      label={t('フォント')}
+      value={known ? cur : 'custom'}
+      options={[
+        { value: 'default', label: t('既定 ({v})', { v: base ? t(base.label) : placeholder.split(',')[0] }) },
+        ...FONT_PRESETS.map((f) => ({ value: f.value, label: t(f.label) })),
+        ...(known ? [] : [{ value: 'custom', label: cur }]),
+      ]}
+      onCommit={(v) => {
+        if (v === 'default') onCommit(undefined);
+        else if (v !== 'custom') onCommit(v);
+      }}
+    />
   );
 }
 
@@ -178,25 +360,6 @@ function useNumInput(value: number | undefined, onCommit: (v: number | undefined
   };
 }
 
-function toHex(c: string | undefined): string {
-  if (!c) return '#000000';
-  if (/^#[0-9a-fA-F]{6}$/.test(c)) return c;
-  if (/^#[0-9a-fA-F]{3}$/.test(c)) return '#' + c[1] + c[1] + c[2] + c[2] + c[3] + c[3];
-  if (/^#[0-9a-fA-F]{8}$/.test(c)) return c.slice(0, 7);
-  // named colors: resolve through canvas
-  try {
-    const ctx = document.createElement('canvas').getContext('2d');
-    if (ctx) {
-      ctx.fillStyle = c;
-      const s = ctx.fillStyle;
-      if (/^#[0-9a-fA-F]{6}$/.test(s)) return s;
-    }
-  } catch {
-    /* ignore */
-  }
-  return '#000000';
-}
-
 export function ColorField({
   label,
   value,
@@ -225,13 +388,17 @@ export function ColorField({
     <div className="field">
       <label>{label}</label>
       <div className="row">
-        <input
-          type="color"
-          value={toHex(value ?? placeholder)}
-          onInput={(e) => onLive?.((e.target as HTMLInputElement).value)}
-          onChange={(e) => onCommit(e.target.value)}
-          title={t('色を選択')}
-        />
+        <ColorPopoverButton
+          className="swatch-btn"
+          title={t('色を選択（よく使う色）')}
+          value={value ?? placeholder}
+          allowNone={allowNone}
+          allowDefault={value !== undefined}
+          onLive={onLive}
+          onPick={(c) => onCommit(c)}
+        >
+          <span className="swatch-cur" style={{ background: value === 'none' || placeholder === 'none' ? '#fff' : toHex(value ?? placeholder) }} />
+        </ColorPopoverButton>
         <input
           type="text"
           value={text}
@@ -307,21 +474,12 @@ const ARROW_LABELS: Record<string, string> = {
   both: '両方向',
 };
 
-const FONT_PRESETS: { value: string; label: string }[] = [
-  { value: 'Arial, Helvetica, sans-serif', label: 'Arial / Helvetica' },
-  { value: "'Times New Roman', Times, serif", label: 'Times New Roman' },
-  { value: "Georgia, 'Times New Roman', serif", label: 'Georgia' },
-  { value: "Cambria, Georgia, 'Times New Roman', serif", label: 'Cambria' },
-  { value: "'Segoe UI', Meiryo, 'Yu Gothic UI', sans-serif", label: 'Segoe UI / Meiryo' },
-  { value: "Meiryo, 'Yu Gothic', 'Hiragino Sans', sans-serif", label: 'メイリオ / 游ゴシック (日本語)' },
-  { value: "'Yu Mincho', 'MS Mincho', 'Hiragino Mincho ProN', serif", label: '游明朝 / MS 明朝 (日本語)' },
-  { value: "'Microsoft JhengHei', 'PingFang TC', 'Noto Sans CJK TC', sans-serif", label: '微軟正黑體 (繁體中文)' },
-  { value: "'Noto Sans CJK JP', 'Noto Sans JP', 'Noto Sans TC', sans-serif", label: 'Noto Sans CJK' },
-  { value: "Consolas, 'Courier New', monospace", label: 'Consolas / Courier New' },
-];
-
 const HELP_ITEMS: string[] = [
-  'ノードをドラッグで移動、角のハンドルでサイズ変更',
+  'ノードをドラッグで移動、角のハンドルでサイズ変更（辺のハンドルで幅・高さだけ変更）',
+  '上の書式バー: 整列・サイズ/スタイルを基準に合わせる・既定に戻す・太字/斜体/下線 (Ctrl+B/I/U)・文字揃え・色・90° 回転',
+  '複数選択では最後に選択した図形が「基準」（太い枠）。他の図形のサイズやスタイルを基準に揃えられます',
+  'ラベルの一部だけ書式を変えるには、ラベル欄で文字を選択して B / I / U / 色のボタンを押します（<b>…</b> などのタグ）',
+  '線が交差するところには自動でジャンプ（跨ぎ）が描かれます（全体スタイルのジャンプ半径で調整、0 で無効）',
   'Alt を押しながらドラッグするとグリッド・整列ガイド・角度のスナップを一時的に解除して自由に動かせます。矢印キーで 1px、Shift+矢印でグリッド単位の微調整',
   'ノード上の青い○ (ポート) から別ノードへドラッグで接続。または「接続」モード (C)',
   '線を選択 → ▬ で区間移動、■ で曲がり角移動、○ で曲がり角追加。線をダブルクリックで分岐点',
@@ -394,13 +552,24 @@ function NodeInspector({ node }: { node: DNode }) {
         options={NODE_TYPES.map((ty) => ({ value: ty, label: t(TYPE_LABELS[ty]) }))}
         onCommit={(v) => upd({ type: v })}
       />
-      <TextField
+      <MarkupTextField
         label={node.type === 'image' ? t('キャプション') : t('ラベル')}
         value={node.label}
-        multiline
         focusKey={focusReq}
         placeholder={t('テキスト。数式は $...$、改行可 (Ctrl+Enter で確定)')}
         onCommit={(v) => upd({ label: v })}
+      />
+      <TextStyleRow
+        bold={rs.bold}
+        italic={rs.italic}
+        underline={rs.underline}
+        align={rs.textAlign}
+        onToggle={(k) => {
+          const cur = rs[k];
+          const def = k === 'underline' ? false : !!(style.defaults[node.type] ?? {})[k];
+          upd({ [k]: !cur === def ? undefined : !cur });
+        }}
+        onAlign={(a) => upd({ textAlign: a === ((style.defaults[node.type] ?? {}).textAlign ?? 'center') ? undefined : a })}
       />
       {node.type === 'image' && <ImageSection node={node} />}
       <SelectField
@@ -448,6 +617,12 @@ function NodeInspector({ node }: { node: DNode }) {
           {t('左向き (flip)')}
         </label>
       )}
+      <SelectField
+        label={t('回転')}
+        value={String(rs.rotate)}
+        options={ROTATIONS.map((r) => ({ value: String(r), label: r === 0 ? t('なし') : `${r}°` }))}
+        onCommit={(v) => upd({ rotate: Number(v) === 0 ? undefined : Number(v) })}
+      />
       {node.type === 'junction' && (
         <SelectField
           label={t('点の表示')}
@@ -495,15 +670,13 @@ function NodeInspector({ node }: { node: DNode }) {
       )}
       <ColorField label={t('文字色')} value={node.color} placeholder={rs.color} onLive={(v) => upd({ color: v }, true)} onCommit={(v) => upd({ color: v })} />
       <NumField label={t('文字サイズ')} value={node.fontSize} placeholder={String(rs.fontSize)} min={1} onCommit={(v) => upd({ fontSize: v })} />
+      <FontSelect value={node.font} placeholder={(style.defaults[node.type] ?? {}).font ?? style.font} onCommit={(v) => upd({ font: v })} />
       <div className="btn-row">
         <button className="btn" onClick={() => useStore.getState().duplicateSelection()}>
           {t('複製')}
         </button>
-        <button
-          className="btn"
-          onClick={() => upd({ fill: undefined, stroke: undefined, color: undefined, fontSize: undefined, strokeWidth: undefined, radius: undefined })}
-        >
-          {t('個別スタイルを解除')}
+        <button className="btn" onClick={() => useStore.getState().resetSelection()} title={t('サイズ・色・文字・回転の個別設定をすべて外して既定に戻します')}>
+          {t('既定に戻す')}
         </button>
         <button className="btn danger" onClick={() => useStore.getState().deleteSelection()}>
           {t('削除')}
@@ -538,6 +711,7 @@ function EdgeInspector({ edge }: { edge: DEdge }) {
   const diagram = useStore((s) => s.diagram);
   const style = diagram.style;
   const upd = (patch: Partial<DEdge>, live?: boolean) => useStore.getState().updateEdge(edge.id, patch, live);
+  const et = resolveEdgeText(edge, style);
   const nodeOpts = diagram.nodes.map((n) => ({ value: n.id, label: n.id + (n.label ? ` (${n.label.split('\n')[0]})` : '') }));
   const sideOpts: { value: Side | 'auto'; label: string }[] = [
     { value: 'auto', label: t('自動') },
@@ -570,7 +744,19 @@ function EdgeInspector({ edge }: { edge: DEdge }) {
         </div>
       )}
       <TextField label={t('符号 (sign)')} value={edge.sign ?? ''} placeholder={t('+ / - (加算点用)')} onCommit={(v) => upd({ sign: v || undefined })} />
+      <TextStyleRow
+        bold={et.bold}
+        italic={et.italic}
+        align={et.textAlign}
+        onToggle={(k) => {
+          if (k === 'underline') return;
+          const def = !!(style.defaults.text ?? {})[k];
+          upd({ [k]: !et[k] === def ? undefined : !et[k] });
+        }}
+        onAlign={(a) => upd({ textAlign: a === edgeTextDefaults(style).textAlign ? undefined : a })}
+      />
       <NumField label={t('文字サイズ')} value={edge.fontSize} placeholder={String(edgeTextDefaults(style).fontSize)} min={1} onCommit={(v) => upd({ fontSize: v })} />
+      <FontSelect value={edge.font} placeholder={edgeTextDefaults(style).font} onCommit={(v) => upd({ font: v })} />
       <h3>{t('線')}</h3>
       <SelectField
         label={t('矢印')}
@@ -588,8 +774,20 @@ function EdgeInspector({ edge }: { edge: DEdge }) {
         ]}
         onCommit={(v) => upd({ dash: v === 'solid' ? undefined : v })}
       />
+      <NumField label={t('矢印サイズ')} value={edge.arrowSize} placeholder={String(style.arrowSize)} min={1} onCommit={(v) => upd({ arrowSize: v })} />
       <NumField label={t('太さ')} value={edge.width} placeholder={String(style.lineWidth)} step={0.5} min={0} onCommit={(v) => upd({ width: v })} />
       <ColorField label={t('色')} value={edge.color} placeholder={style.lineColor} onLive={(v) => upd({ color: v }, true)} onCommit={(v) => upd({ color: v })} />
+      <SelectField
+        label={t('交差のジャンプ')}
+        value={edge.jump === undefined ? 'default' : edge.jump ? 'on' : 'off'}
+        options={[
+          { value: 'default', label: t('全体設定に従う ({v})', { v: style.jumpSize > 0 ? 'ON' : 'OFF' }) },
+          { value: 'on', label: t('跨ぐ（この線が上）') },
+          { value: 'off', label: t('跨がない') },
+        ]}
+        onCommit={(v) => upd({ jump: v === 'default' ? undefined : v === 'on' })}
+      />
+      <p className="muted">{t('後に書いた線が先に書いた線を跨ぎます。ジャンプの大きさは全体スタイルで変えられます。')}</p>
       <h3>{t('経路')}</h3>
       <SelectField
         label={t('ルーティング')}
@@ -659,25 +857,22 @@ function EdgeInspector({ edge }: { edge: DEdge }) {
 
 function MultiInspector({ ids, labelIds }: { ids: string[]; labelIds: string[] }) {
   const t = useT();
+  const sel = useStore((s) => s.selection);
+  const diagram = useStore((s) => s.diagram);
+  const style = diagram.style;
   const align = (mode: AlignMode) => useStore.getState().alignSelection(mode);
   const distribute = (axis: 'x' | 'y') => useStore.getState().distributeSelection(axis);
-  const sameSize = () => useStore.getState().sameSizeSelection();
   const total = ids.length + labelIds.length;
-  // bulk style: nodes take every field; selected line labels take the font size
-  const setAll = (patch: Partial<DNode>, live?: boolean) => {
-    const fn = (d: Diagram) => {
-      for (const n of d.nodes) if (ids.includes(n.id)) Object.assign(n, patch);
-      if (patch.fontSize !== undefined || 'fontSize' in patch) {
-        for (const e of d.edges) {
-          if (!labelIds.includes(e.id)) continue;
-          if (patch.fontSize === undefined) delete e.fontSize;
-          else e.fontSize = patch.fontSize;
-        }
-      }
-    };
-    if (live) useStore.getState().liveUpdate(fn);
-    else useStore.getState().commit(fn);
-  };
+  const [refId, setRefId] = useState<string | undefined>(undefined);
+  const ref = refId && ids.includes(refId) ? refId : referenceNodeId(sel);
+  const refNode = ref ? diagram.nodes.find((n) => n.id === ref) : undefined;
+  const refSize = refNode ? nodeSize(refNode, style) : undefined;
+  const match = (what: MatchWhat) => useStore.getState().matchSelection(what, ref);
+  const setAll = (node: Partial<DNode>, edge?: Partial<DEdge>, live?: boolean) => useStore.getState().updateSelection({ node, edge }, live);
+  const shapes = ids.filter((id) => {
+    const n = diagram.nodes.find((x) => x.id === id);
+    return n && n.type !== 'text' && n.type !== 'junction';
+  });
   return (
     <div className="inspector">
       <h3>{labelIds.length > 0 ? t('{n} 個を選択中（ノード {a}・線ラベル {b}）', { n: total, a: ids.length, b: labelIds.length }) : t('{n} 個のノードを選択中', { n: total })}</h3>
@@ -702,7 +897,7 @@ function MultiInspector({ ids, labelIds }: { ids: string[]; labelIds: string[] }
           {t('下揃え')}
         </button>
       </div>
-      <div className="muted">{t('等間隔配置 / サイズ')}</div>
+      <div className="muted">{t('等間隔配置')}</div>
       <div className="btn-row">
         <button className="btn" onClick={() => distribute('x')} disabled={total < 3}>
           {t('横に等間隔')}
@@ -710,26 +905,86 @@ function MultiInspector({ ids, labelIds }: { ids: string[]; labelIds: string[] }
         <button className="btn" onClick={() => distribute('y')} disabled={total < 3}>
           {t('縦に等間隔')}
         </button>
-        <button className="btn" onClick={sameSize} disabled={ids.length < 2}>
-          {t('サイズを揃える')}
-        </button>
       </div>
       {labelIds.length > 0 && <p className="muted">{t('線ラベルは位置 (offset) を変えて揃えます。ドラッグでまとめて動かすこともできます。')}</p>}
-      <h3>{t('一括スタイル')}</h3>
       {ids.length > 0 && (
         <>
-          <ColorField label={t('塗り')} value={undefined} onLive={(v) => setAll({ fill: v }, true)} onCommit={(v) => setAll({ fill: v })} allowNone />
-          <ColorField label={t('枠線')} value={undefined} onLive={(v) => setAll({ stroke: v }, true)} onCommit={(v) => setAll({ stroke: v })} />
-          <ColorField label={t('文字色')} value={undefined} onLive={(v) => setAll({ color: v }, true)} onCommit={(v) => setAll({ color: v })} />
+          <h3>{t('基準に合わせる')}</h3>
+          <SelectField
+            label={t('基準の図形')}
+            value={ref ?? ''}
+            options={ids.map((id) => {
+              const n = diagram.nodes.find((x) => x.id === id);
+              return { value: id, label: id + (n?.label ? ` (${n.label.split('\n')[0]})` : '') };
+            })}
+            onCommit={(v) => setRefId(v)}
+          />
+          <p className="muted">
+            {t('既定では最後に選択した図形が基準です（太い枠）。')}
+            {refSize && refNode && refNode.type !== 'text' ? ` ${t('サイズ')}: ${Math.round(refSize.w)} × ${Math.round(refSize.h)}` : ''}
+          </p>
+          <div className="btn-row">
+            <button className="btn" onClick={() => match('size')} disabled={ids.length < 2} title={t('他の図形の幅・高さを基準の図形と同じにします')}>
+              {t('サイズを揃える')}
+            </button>
+            <button className="btn" onClick={() => match('style')} disabled={ids.length < 2} title={t('塗り・枠線・太さ・角丸・線種を基準の図形からコピーします')}>
+              {t('図形スタイルを揃える')}
+            </button>
+            <button className="btn" onClick={() => match('text')} disabled={total < 2} title={t('文字色・文字サイズ・太字/斜体・フォント・文字揃えを基準の図形からコピーします')}>
+              {t('文字スタイルを揃える')}
+            </button>
+            <button className="btn" onClick={() => match('all')} disabled={total < 2}>
+              {t('すべて揃える')}
+            </button>
+          </div>
         </>
       )}
-      <NumField label={t('文字サイズ')} value={undefined} onCommit={(v) => setAll({ fontSize: v })} />
+      <h3>{t('一括変更')}</h3>
+      {shapes.length > 0 && (
+        <div className="field">
+          <label>{t('サイズ (w, h)')}</label>
+          <div className="pair">
+            <NumFieldInline value={undefined} placeholder={t('幅')} onCommit={(v) => setAll({ w: v })} />
+            <NumFieldInline value={undefined} placeholder={t('高さ')} onCommit={(v) => setAll({ h: v })} />
+          </div>
+        </div>
+      )}
+      {shapes.length > 0 && (
+        <>
+          <ColorField label={t('塗り')} value={undefined} onLive={(v) => setAll({ fill: v }, undefined, true)} onCommit={(v) => setAll({ fill: v })} allowNone />
+          <ColorField label={t('枠線')} value={undefined} onLive={(v) => setAll({ stroke: v }, undefined, true)} onCommit={(v) => setAll({ stroke: v })} />
+          <NumField label={t('枠線の太さ')} value={undefined} placeholder={String(style.lineWidth)} step={0.5} min={0} onCommit={(v) => setAll({ strokeWidth: v })} />
+          <NumField label={t('角丸半径')} value={undefined} placeholder={String(style.cornerRadius)} min={0} onCommit={(v) => setAll({ radius: v })} />
+        </>
+      )}
+      {ids.length > 0 && <ColorField label={t('文字色')} value={undefined} onLive={(v) => setAll({ color: v }, undefined, true)} onCommit={(v) => setAll({ color: v })} />}
+      <NumField label={t('文字サイズ')} value={undefined} placeholder={String(style.fontSize)} min={1} onCommit={(v) => setAll({ fontSize: v }, { fontSize: v })} />
+      <FontSelect value={undefined} placeholder={style.font} onCommit={(v) => setAll({ font: v }, { font: v })} />
+      <TextStyleRow
+        bold={!!refNode && resolveNode(refNode, style).bold}
+        italic={!!refNode && resolveNode(refNode, style).italic}
+        underline={ids.length > 0 ? !!refNode && resolveNode(refNode, style).underline : undefined}
+        align={refNode ? resolveNode(refNode, style).textAlign : 'center'}
+        onToggle={(k) => useStore.getState().toggleTextStyle(k)}
+        onAlign={(a) => setAll({ textAlign: a === 'center' ? undefined : a }, { textAlign: a === 'center' ? undefined : a })}
+      />
       <div className="btn-row">
         {ids.length > 0 && (
-          <button className="btn" onClick={() => useStore.getState().duplicateSelection()}>
-            {t('複製')}
-          </button>
+          <>
+            <button className="btn" onClick={() => useStore.getState().rotateSelection(-90)} title={t('左に 90° 回転')}>
+              ↺ 90°
+            </button>
+            <button className="btn" onClick={() => useStore.getState().rotateSelection(90)} title={t('右に 90° 回転')}>
+              ↻ 90°
+            </button>
+            <button className="btn" onClick={() => useStore.getState().duplicateSelection()}>
+              {t('複製')}
+            </button>
+          </>
         )}
+        <button className="btn" onClick={() => useStore.getState().resetSelection()} title={t('サイズ・色・文字・回転の個別設定をすべて外して既定に戻します')}>
+          {t('既定に戻す')}
+        </button>
         <button className="btn danger" onClick={() => useStore.getState().deleteSelection()} title={labelIds.length > 0 ? t('選択した線ラベルは文字が消えます（線は残ります）') : undefined}>
           {t('削除')}
         </button>
@@ -833,6 +1088,17 @@ function StylePanel() {
         onCommit={(v) => upd({ arrow: v })}
       />
       <NumField label={t('矢印サイズ')} value={style.arrowSize} min={1} onCommit={(v) => upd({ arrowSize: v ?? DEFAULT_STYLE.arrowSize })} />
+      <NumField
+        label={t('交差のジャンプ')}
+        value={style.jumpSize}
+        min={0}
+        step={1}
+        placeholder="0"
+        onCommit={(v) => upd({ jumpSize: v ?? 0 })}
+      />
+      <p className="muted" style={{ marginTop: -2 }}>
+        {t('線が交差する所に描くジャンプ（跨ぎ）の半径。0 で無効。後に書いた線が先の線を跨ぎます。')}
+      </p>
       <h3>{t('ブロック')}</h3>
       <div className="field">
         <label>{t('既定サイズ')}</label>

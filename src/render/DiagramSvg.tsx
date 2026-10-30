@@ -1,14 +1,16 @@
 import React from 'react';
 import { Box, perpLeft } from '../geometry/geometry';
-import { ArrowKind, Assets, DEdge, DStyle, Point, edgeTextDefaults, resolveNode, resolveSrc } from '../model/types';
+import { ArrowKind, Assets, DEdge, DStyle, Point, edgeTextDefaults, resolveEdgeText, resolveNode, resolveSrc } from '../model/types';
 import { LabelSvg } from './label';
-import { DiagramLayout, EdgeLayout, junctionDotVisible, nodeLabelPos } from './layout';
+import { DiagramLayout, EdgeLayout, Jump, junctionDotVisible, nodeLabelLocalPos, shapeBox } from './layout';
 
 export interface Selection {
   nodes: Set<string>;
   edges: Set<string>;
   /** connections whose label is selected as a piece of text */
   labels: Set<string>;
+  /** the reference node of a multi-selection (drawn with a stronger frame) */
+  primary?: string;
 }
 
 export interface DiagramSvgProps {
@@ -31,6 +33,7 @@ function NodeShape({
   style,
   assets,
   selected,
+  primary,
   hover,
   edit,
 }: {
@@ -38,6 +41,7 @@ function NodeShape({
   style: DStyle;
   assets: Assets;
   selected: boolean;
+  primary?: boolean;
   hover: boolean;
   edit: boolean;
 }) {
@@ -142,7 +146,7 @@ function NodeShape({
           height={h + 6}
           fill="none"
           stroke={SEL_COLOR}
-          strokeWidth={selected ? 1.5 : 1}
+          strokeWidth={primary ? 3 : selected ? 1.5 : 1}
           strokeDasharray={selected ? undefined : '3 3'}
           opacity={selected ? 1 : 0.6}
           pointerEvents="none"
@@ -213,6 +217,36 @@ function pathD(points: Point[]): string {
   return points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x} ${p.y}`).join(' ');
 }
 
+const f = (v: number) => Math.round(v * 100) / 100;
+
+/**
+ * Path of a polyline with semicircular hops at the given crossings. Horizontal
+ * runs hop upward, vertical ones to the left, so every hop of a diagram looks alike.
+ */
+function pathWithJumps(points: Point[], jumps: Jump[], r: number): string {
+  if (jumps.length === 0 || r <= 0) return pathD(points);
+  let d = `M${f(points[0].x)} ${f(points[0].y)}`;
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+    const dir = { x: (b.x - a.x) / len, y: (b.y - a.y) / len };
+    const n1 = { x: dir.y, y: -dir.x }; // bump side for sweep = 1
+    const sweep = n1.y < -1e-6 || (Math.abs(n1.y) < 1e-6 && n1.x < 0) ? 1 : 0;
+    for (const j of jumps) {
+      if (j.seg !== i) continue;
+      // distance of the hop along the (possibly shortened) segment
+      const t = (j.p.x - a.x) * dir.x + (j.p.y - a.y) * dir.y;
+      if (t - r < 0 || t + r > len) continue;
+      const s1 = { x: a.x + dir.x * (t - r), y: a.y + dir.y * (t - r) };
+      const s2 = { x: a.x + dir.x * (t + r), y: a.y + dir.y * (t + r) };
+      d += ` L${f(s1.x)} ${f(s1.y)} A${f(r)} ${f(r)} 0 0 ${sweep} ${f(s2.x)} ${f(s2.y)}`;
+    }
+    d += ` L${f(b.x)} ${f(b.y)}`;
+  }
+  return d;
+}
+
 function EdgeShape({
   el,
   style,
@@ -230,16 +264,17 @@ function EdgeShape({
   const color = e.color ?? style.lineColor;
   const lw = e.width ?? style.lineWidth;
   const kind = arrowKind(e, style, el.toJunction);
-  const size = style.arrowSize;
+  const size = e.arrowSize ?? style.arrowSize;
   const endKind: ArrowKind = kind === 'both' ? 'triangle' : kind;
   const startKind: ArrowKind = kind === 'both' ? 'triangle' : 'none';
   const shortenBy = (k: ArrowKind) => (k === 'triangle' ? size * 0.7 : k === 'dot' ? size * 0.35 : 0);
   const pts = el.route.points;
   const drawn = shorten(pts, shortenBy(startKind), shortenBy(endKind));
   const dash = e.dash === 'dashed' ? `${lw * 5} ${lw * 3}` : e.dash === 'dotted' ? `${lw} ${lw * 2}` : undefined;
-  const d = pathD(drawn);
+  const d = pathWithJumps(drawn, el.jumps, style.jumpSize > 0 ? style.jumpSize : 6);
   const start = pts[0];
   const end = pts[pts.length - 1];
+  const ta = resolveEdgeText(e, style);
   return (
     <g data-edge-group={e.id}>
       {edit && selected && <path d={pathD(pts)} fill="none" stroke={SEL_COLOR} strokeWidth={lw + 6} opacity={0.25} strokeLinejoin="round" />}
@@ -252,7 +287,8 @@ function EdgeShape({
           layout={el.label.layout}
           x={el.label.pos.x}
           y={el.label.pos.y}
-          color={e.color ?? edgeTextDefaults(style).color}
+          textAlign={ta.textAlign}
+          color={ta.color}
           dataAttrs={edit ? { 'data-edge-label': e.id } : undefined}
           className={edit ? 'edge-label' : undefined}
         />
@@ -304,12 +340,28 @@ export function DiagramContent({ layout, mode, selection, hoverNode }: DiagramSv
           const box = boxes.get(n.id)!;
           const lay = labels.get(n.id)!;
           const selected = !!selection?.nodes.has(n.id);
-          const lp = nodeLabelPos(box, lay, s);
+          const rs = resolveNode(n, s);
+          // the shape and its label are drawn in the node's own frame, then turned together
+          const local = shapeBox(box);
+          const lp = nodeLabelLocalPos(box, lay, s);
           return (
-            <g key={n.id} data-node={n.id} style={edit ? { cursor: 'move' } : undefined}>
-              <NodeShape box={box} style={s} assets={diagram.assets} selected={selected} hover={edit && hoverNode === n.id && !selected} edit={edit} />
+            <g
+              key={n.id}
+              data-node={n.id}
+              style={edit ? { cursor: 'move' } : undefined}
+              transform={rs.rotate ? `rotate(${rs.rotate} ${box.cx} ${box.cy})` : undefined}
+            >
+              <NodeShape
+                box={local}
+                style={s}
+                assets={diagram.assets}
+                selected={selected}
+                primary={edit && selection?.primary === n.id}
+                hover={edit && hoverNode === n.id && !selected}
+                edit={edit}
+              />
               {(n.label !== '' || n.type === 'sum') && (
-                <LabelSvg layout={lay} x={lp.x} y={lp.y} color={n.color ?? s.textColor} />
+                <LabelSvg layout={lay} x={lp.x} y={lp.y} textAlign={rs.textAlign} color={rs.color} />
               )}
               {edit && selected && n.label !== '' && n.type !== 'text' && resolveNode(n, s).labelPos !== 'center' && (
                 // drag handle for the label of a selected node whose label sits outside the shape

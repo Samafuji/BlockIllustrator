@@ -7,6 +7,7 @@ import { Diagram } from '../model/types';
 import { ExportSvg, exportSize } from '../render/DiagramSvg';
 import { layoutDiagram } from '../render/layout';
 import { RasterImage, svgToEps } from './eps';
+import { downloadBlob } from './files';
 
 export interface SvgResult {
   svg: string;
@@ -21,25 +22,19 @@ export function buildSvg(diagram: Diagram): SvgResult {
   return { svg: '<?xml version="1.0" encoding="UTF-8"?>\n' + markup, w: size.w, h: size.h };
 }
 
-export function downloadBlob(blob: Blob, name: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 2000);
-}
+/** Where an exported file goes: a download by default, or a save dialog (see io/actions). */
+export type Deliver = (blob: Blob, fileName: string) => Promise<void> | void;
+
+export { downloadBlob } from './files';
 
 export function baseName(fileName: string | null): string {
   if (!fileName) return 'diagram';
   return fileName.replace(/\.[^.]+$/, '') || 'diagram';
 }
 
-export function exportSvgFile(diagram: Diagram, name: string) {
+export async function exportSvgFile(diagram: Diagram, name: string, deliver: Deliver = downloadBlob) {
   const { svg } = buildSvg(diagram);
-  downloadBlob(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }), `${name}.svg`);
+  await deliver(new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }), `${name}.svg`);
 }
 
 function loadImage(url: string): Promise<HTMLImageElement> {
@@ -70,9 +65,9 @@ export async function renderPng(diagram: Diagram, scale = 2): Promise<Blob> {
   }
 }
 
-export async function exportPngFile(diagram: Diagram, name: string, scale = 2) {
+export async function exportPngFile(diagram: Diagram, name: string, scale = 2, deliver: Deliver = downloadBlob) {
   const blob = await renderPng(diagram, scale);
-  downloadBlob(blob, `${name}@${scale}x.png`);
+  await deliver(blob, `${name}@${scale}x.png`);
 }
 
 export async function copyPngToClipboard(diagram: Diagram, scale = 2) {
@@ -109,9 +104,9 @@ export async function renderPdf(diagram: Diagram): Promise<Blob> {
   return doc.output('blob');
 }
 
-export async function exportPdfFile(diagram: Diagram, name: string) {
+export async function exportPdfFile(diagram: Diagram, name: string, deliver: Deliver = downloadBlob) {
   const blob = await renderPdf(diagram);
-  downloadBlob(blob, `${name}.pdf`);
+  await deliver(blob, `${name}.pdf`);
 }
 
 /** Longest side of a raster embedded in EPS (hex data is 6 bytes per pixel in the file). */
@@ -161,9 +156,9 @@ export async function renderEps(diagram: Diagram): Promise<string> {
   return svgToEps(svg, w, h, images);
 }
 
-export async function exportEpsFile(diagram: Diagram, name: string) {
+export async function exportEpsFile(diagram: Diagram, name: string, deliver: Deliver = downloadBlob) {
   const eps = await renderEps(diagram);
-  downloadBlob(new Blob([eps], { type: 'application/postscript' }), `${name}.eps`);
+  await deliver(new Blob([eps], { type: 'application/postscript' }), `${name}.eps`);
 }
 
 /** Vector PDF through the browser's print dialog (keeps every font, incl. CJK). */

@@ -64,6 +64,16 @@ const ATTR_WORDS = new Set([
   'hidden',
   'src',
   'caption',
+  'bold',
+  'italic',
+  'underline',
+  'normal',
+  'font',
+  'align',
+  'rotate',
+  'arrowsize',
+  'jump',
+  'nojump',
 ]);
 
 export const blockDiagramLanguage = StreamLanguage.define<{ lineStart: boolean }>({

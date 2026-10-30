@@ -6,12 +6,16 @@ import {
   DEdge,
   DNode,
   Diagram,
+  NODE_STYLE_KEYS,
   NodeType,
   Point,
   Side,
   TYPE_PREFIX,
+  TextAlign,
   cloneDiagram,
   nextId,
+  resolveEdgeText,
+  resolveNode,
   usedAssets,
 } from '../model/types';
 import { EXAMPLES } from '../examples';
@@ -157,7 +161,51 @@ export interface StoreState {
   insertJunctionOnEdge: (edgeId: string, at?: { x: number; y: number }) => string | null;
   alignSelection: (mode: AlignMode) => void;
   distributeSelection: (axis: 'x' | 'y') => void;
-  sameSizeSelection: () => void;
+  /** give every selected shape the size of the reference shape (the last one selected, or `refId`) */
+  sameSizeSelection: (refId?: string) => void;
+  /** copy size and/or style from the reference node (the last one selected, or `refId`) to the rest of the selection */
+  matchSelection: (what: MatchWhat, refId?: string) => void;
+  /** remove the explicit size / style of everything selected so it follows the defaults again */
+  resetSelection: () => void;
+  /** change properties of everything selected (nodes, lines, line labels) in one undo step */
+  updateSelection: (patch: SelectionPatch, live?: boolean) => void;
+  /** bold / italic / underline for the selected text: on if any selected item lacks it, else off */
+  toggleTextStyle: (key: 'bold' | 'italic' | 'underline') => void;
+  /** turn the selected nodes by ±90° */
+  rotateSelection: (delta: 90 | -90) => void;
+}
+
+export type MatchWhat = 'size' | 'style' | 'text' | 'all';
+
+/** A bulk edit: node fields apply to the selected nodes, edge fields to selected lines and line labels. */
+export interface SelectionPatch {
+  node?: Partial<DNode>;
+  edge?: Partial<DEdge>;
+}
+
+/** The node whose settings the "match" commands copy: the last one added to the selection. */
+export function referenceNodeId(sel: SelectionState): string | undefined {
+  return sel.nodes[sel.nodes.length - 1];
+}
+
+const NODE_SIZE_KEYS: (keyof DNode)[] = ['w', 'h'];
+const NODE_LOOK_KEYS: (keyof DNode)[] = ['fill', 'stroke', 'strokeWidth', 'radius', 'dash'];
+const NODE_TEXT_KEYS: (keyof DNode)[] = ['color', 'fontSize', 'bold', 'italic', 'underline', 'font', 'textAlign'];
+const EDGE_TEXT_KEYS: (keyof DEdge)[] = ['fontSize', 'bold', 'italic', 'font', 'textAlign'];
+const EDGE_STYLE_KEYS: (keyof DEdge)[] = ['color', 'width', 'dash', 'arrow', 'arrowSize', 'jump', ...EDGE_TEXT_KEYS];
+
+function copyKeys<T extends object>(from: T, to: T, keys: (keyof T)[]): void {
+  for (const k of keys) {
+    if (from[k] === undefined) delete to[k];
+    else (to as any)[k] = JSON.parse(JSON.stringify(from[k]));
+  }
+}
+
+function assignPatch<T extends object>(target: T, patch: Partial<T>): void {
+  for (const k of Object.keys(patch) as (keyof T)[]) {
+    if (patch[k] === undefined) delete target[k];
+    else (target as any)[k] = patch[k];
+  }
 }
 
 export type AlignMode = 'left' | 'hcenter' | 'right' | 'top' | 'vcenter' | 'bottom';
@@ -817,19 +865,131 @@ export const useStore = create<StoreState>((set, get) => {
       moveItems(get, items, targets);
     },
 
-    sameSizeSelection() {
-      const ids = get().selection.nodes;
-      if (ids.length < 2) return;
-      const lay = layoutDiagram(get().diagram);
-      const first = lay.boxes.get(ids[0]);
-      if (!first) return;
+    sameSizeSelection(refId) {
+      get().matchSelection('size', refId);
+    },
+
+    matchSelection(what, refId) {
+      const sel = get().selection;
+      const ref = refId ?? referenceNodeId(sel);
+      if (!ref || sel.nodes.length + sel.labels.length + sel.edges.length < 2) return;
+      const d0 = get().diagram;
+      const refNode = d0.nodes.find((n) => n.id === ref);
+      if (!refNode) return;
+      // sizes are copied as resolved values so a block at its default size is a valid reference
+      const rs = resolveNode(refNode, d0.style);
+      const lay = layoutDiagram(d0);
+      const refBox = lay.boxes.get(ref);
+      const size = what === 'size' || what === 'all';
+      const style = what === 'style' || what === 'all';
+      const text = what === 'text' || what === 'all';
       get().commit((d) => {
-        for (const id of ids.slice(1)) {
-          const n = d.nodes.find((x) => x.id === id);
-          if (n && n.type !== 'text') {
-            n.w = first.w;
-            n.h = first.h;
+        for (const n of d.nodes) {
+          if (n.id === ref || !sel.nodes.includes(n.id)) continue;
+          if (size && n.type !== 'text' && refNode.type !== 'text' && refBox) {
+            const r = ((n.rotate ?? 0) % 180 + 180) % 180;
+            const [w, h] = r === 90 ? [refBox.h, refBox.w] : [refBox.w, refBox.h];
+            if (n.type === 'sum' || n.type === 'junction') n.w = n.h = Math.min(w, h);
+            else {
+              n.w = w;
+              n.h = h;
+            }
           }
+          if (style) {
+            copyKeys(refNode, n, NODE_LOOK_KEYS);
+            if (refNode.type === n.type) copyKeys(refNode, n, ['labelPos']);
+          }
+          if (text) copyKeys(refNode, n, NODE_TEXT_KEYS);
+        }
+        if (text) {
+          for (const e of d.edges) {
+            if (!sel.labels.includes(e.id) && !sel.edges.includes(e.id)) continue;
+            // line labels follow the reference text (font size and style, not the color: that is the line color)
+            const patch: Partial<DEdge> = {
+              fontSize: refNode.fontSize ?? (refNode.type === 'text' ? undefined : rs.fontSize),
+              bold: refNode.bold,
+              italic: refNode.italic,
+              font: refNode.font,
+              textAlign: refNode.textAlign,
+            };
+            assignPatch(e, patch);
+          }
+        }
+      });
+    },
+
+    resetSelection() {
+      const sel = get().selection;
+      if (sel.nodes.length + sel.edges.length + sel.labels.length === 0) return;
+      get().commit((d) => {
+        for (const n of d.nodes) {
+          if (!sel.nodes.includes(n.id)) continue;
+          for (const k of NODE_STYLE_KEYS) delete n[k];
+          if (n.type === 'sum') delete n.sumStyle;
+        }
+        for (const e of d.edges) {
+          if (sel.edges.includes(e.id)) for (const k of EDGE_STYLE_KEYS) delete e[k];
+          else if (sel.labels.includes(e.id)) {
+            for (const k of EDGE_TEXT_KEYS) delete e[k];
+            delete e.labelOffset;
+          }
+        }
+      });
+    },
+
+    updateSelection(patch, live) {
+      const sel = get().selection;
+      const fn = (d: Diagram) => {
+        if (patch.node) for (const n of d.nodes) if (sel.nodes.includes(n.id)) assignPatch(n, patch.node);
+        if (patch.edge) for (const e of d.edges) if (sel.edges.includes(e.id) || sel.labels.includes(e.id)) assignPatch(e, patch.edge);
+      };
+      if (live) get().liveUpdate(fn);
+      else {
+        const keys = [...Object.keys(patch.node ?? {}), ...Object.keys(patch.edge ?? {})].sort().join(',');
+        get().commit(fn, { coalesce: `sel:${keys}` });
+      }
+    },
+
+    toggleTextStyle(key) {
+      const sel = get().selection;
+      const d = get().diagram;
+      const nodes = d.nodes.filter((n) => sel.nodes.includes(n.id));
+      const edges = d.edges.filter((e) => sel.edges.includes(e.id) || sel.labels.includes(e.id));
+      if (nodes.length + edges.length === 0) return;
+      const allOn =
+        nodes.every((n) => resolveNode(n, d.style)[key]) &&
+        edges.every((e) => (key === 'underline' ? true : resolveEdgeText(e, d.style)[key]));
+      const v = allOn ? false : true;
+      get().commit((dd) => {
+        for (const n of dd.nodes) {
+          if (!sel.nodes.includes(n.id)) continue;
+          const def = (dd.style.defaults[n.type] ?? {})[key === 'underline' ? 'bold' : key];
+          // store the flag explicitly only when it differs from the type default
+          if (key === 'underline') {
+            if (v) n.underline = true;
+            else delete n.underline;
+          } else if (v === !!def) delete n[key];
+          else n[key] = v;
+        }
+        if (key === 'underline') return;
+        for (const e of dd.edges) {
+          if (!sel.edges.includes(e.id) && !sel.labels.includes(e.id)) continue;
+          const def = (dd.style.defaults.text ?? {})[key];
+          if (v === !!def) delete e[key];
+          else e[key] = v;
+        }
+      });
+    },
+
+    rotateSelection(delta) {
+      const sel = get().selection;
+      if (sel.nodes.length === 0) return;
+      get().commit((d) => {
+        for (const n of d.nodes) {
+          if (!sel.nodes.includes(n.id)) continue;
+          const r = (((n.rotate ?? 0) + delta) % 360 + 360) % 360;
+          if (r === 0) delete n.rotate;
+          else n.rotate = r;
         }
       });
     },

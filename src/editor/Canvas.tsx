@@ -4,12 +4,13 @@ import { Box, SIDE_DIR, anchorOnSide, followEdgesAfterMove, pointInBox, sideTowa
 import { DEdge, Point, SIDES, Side } from '../model/types';
 import { DiagramContent } from '../render/DiagramSvg';
 import { DiagramLayout, EdgeLayout, layoutDiagram } from '../render/layout';
-import { ViewState, placeEdgeLabels, useStore } from '../store/useStore';
+import { ViewState, placeEdgeLabels, referenceNodeId, useStore } from '../store/useStore';
 import { importImageFiles } from '../io/images';
 import { canvasApi } from './canvasApi';
 import { codeEditorApi } from './CodePanel';
 
-type Corner = 'nw' | 'ne' | 'sw' | 'se';
+/** resize handle: a corner, or the middle of a side (one axis only) */
+type Corner = 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w';
 
 type Interaction =
   | { kind: 'none' }
@@ -35,7 +36,18 @@ type Interaction =
       group: { left: number; right: number; top: number; bottom: number };
     }
   /** `aspect` (w/h) is set for images, whose proportions are kept unless Shift is held */
-  | { kind: 'resize'; id: string; corner: Corner; fixed: Point; moved: boolean; aspect?: number }
+  | {
+      kind: 'resize';
+      id: string;
+      corner: Corner;
+      fixed: Point;
+      /** box at drag start (what the untouched axis keeps) */
+      orig: { cx: number; cy: number; w: number; h: number };
+      /** the node is turned by 90°: its width runs vertically on screen */
+      rotated: boolean;
+      moved: boolean;
+      aspect?: number;
+    }
   /** drag a bend point. `bake` turns an auto-routed line into explicit waypoints on the first move */
   | { kind: 'waypoint'; edgeId: string; index: number; moved: boolean; bake?: Bake }
   /** drag an axis-aligned segment: moves its bend point(s) perpendicular to the segment */
@@ -150,7 +162,13 @@ export function Canvas() {
   const layoutRef = useRef<DiagramLayout>(layout);
   layoutRef.current = layout;
   const selSets = useMemo(
-    () => ({ nodes: new Set(selection.nodes), edges: new Set(selection.edges), labels: new Set(selection.labels) }),
+    () => ({
+      nodes: new Set(selection.nodes),
+      edges: new Set(selection.edges),
+      labels: new Set(selection.labels),
+      // with several nodes selected, the last one is the reference for "match size / style"
+      primary: selection.nodes.length > 1 ? referenceNodeId(selection) : undefined,
+    }),
     [selection],
   );
 
@@ -469,7 +487,17 @@ export function Canvas() {
         y: corner.includes('s') ? box.cy - box.h / 2 : box.cy + box.h / 2,
       };
       const aspect = box.node.type === 'image' && box.h > 0 ? box.w / box.h : undefined;
-      inter.current = { kind: 'resize', id, corner, fixed, moved: false, aspect };
+      const rot = ((((box.node.rotate ?? 0) % 360) + 360) % 360) % 180;
+      inter.current = {
+        kind: 'resize',
+        id,
+        corner,
+        fixed,
+        orig: { cx: box.cx, cy: box.cy, w: box.w, h: box.h },
+        rotated: rot === 90,
+        moved: false,
+        aspect,
+      };
       svg.setPointerCapture(e.pointerId);
       return;
     }
@@ -681,28 +709,33 @@ export function Canvas() {
       }
       case 'resize': {
         it.moved = true;
+        // side handles change one axis only; corners change both
+        const hasX = it.corner.includes('e') || it.corner.includes('w');
+        const hasY = it.corner.includes('n') || it.corner.includes('s');
         const sx = it.corner.includes('e') ? 1 : -1;
         const sy = it.corner.includes('s') ? 1 : -1;
-        let w = Math.max(10, (snapV(world.x) - it.fixed.x) * sx);
-        let h = Math.max(10, (snapV(world.y) - it.fixed.y) * sy);
+        let w = hasX ? Math.max(10, (snapV(world.x) - it.fixed.x) * sx) : it.orig.w;
+        let h = hasY ? Math.max(10, (snapV(world.y) - it.fixed.y) * sy) : it.orig.h;
         const node = st.diagram.nodes.find((n) => n.id === it.id);
         if (!node) return;
         if (node.type === 'sum' || node.type === 'junction' || (node.type === 'circle' && e.shiftKey)) {
-          w = h = Math.max(w, h);
+          w = h = hasX && hasY ? Math.max(w, h) : hasX ? w : h;
         } else if (it.aspect && !e.shiftKey) {
           // keep the picture's proportions; the larger relative change wins
-          if (w / it.aspect >= h) h = Math.max(10, Math.round(w / it.aspect));
+          if (!hasY || (hasX && w / it.aspect >= h)) h = Math.max(10, Math.round(w / it.aspect));
           else w = Math.max(10, Math.round(h * it.aspect));
         }
-        const cx = it.fixed.x + (sx * w) / 2;
-        const cy = it.fixed.y + (sy * h) / 2;
+        const cx = hasX || w !== it.orig.w ? it.fixed.x + (sx * w) / 2 : it.orig.cx;
+        const cy = hasY || h !== it.orig.h ? it.fixed.y + (sy * h) / 2 : it.orig.cy;
+        const rotated = it.rotated;
         st.liveUpdate((d) => {
           const n = d.nodes.find((x) => x.id === it.id);
           if (!n) return;
           n.x = cx;
           n.y = cy;
-          n.w = w;
-          n.h = h;
+          // a node turned by 90° stores its size in its own frame
+          n.w = rotated ? h : w;
+          n.h = rotated ? w : h;
         });
         break;
       }
@@ -1067,27 +1100,43 @@ export function Canvas() {
               (() => {
                 const box = layout.boxes.get(singleNode);
                 if (!box) return null;
-                const corners: { c: Corner; x: number; y: number; cur: string }[] = [
+                const round = box.node.type === 'sum' || box.node.type === 'junction';
+                const corners: { c: Corner; x: number; y: number; cur: string; side?: boolean }[] = [
                   { c: 'nw', x: box.cx - box.w / 2, y: box.cy - box.h / 2, cur: 'nwse-resize' },
                   { c: 'ne', x: box.cx + box.w / 2, y: box.cy - box.h / 2, cur: 'nesw-resize' },
                   { c: 'sw', x: box.cx - box.w / 2, y: box.cy + box.h / 2, cur: 'nesw-resize' },
                   { c: 'se', x: box.cx + box.w / 2, y: box.cy + box.h / 2, cur: 'nwse-resize' },
                 ];
-                return corners.map((k) => (
-                  <rect
-                    key={k.c}
-                    x={k.x - 4 * hs}
-                    y={k.y - 4 * hs}
-                    width={8 * hs}
-                    height={8 * hs}
-                    fill="#fff"
-                    stroke={HANDLE}
-                    strokeWidth={1.5 * hs}
-                    data-resize={k.c}
-                    data-resize-node={singleNode}
-                    style={{ cursor: k.cur }}
-                  />
-                ));
+                // side handles (one axis) for everything but circles, whose size is a diameter
+                if (!round && box.w > 24 * hs && box.h > 24 * hs) {
+                  corners.push(
+                    { c: 'n', x: box.cx, y: box.cy - box.h / 2, cur: 'ns-resize', side: true },
+                    { c: 's', x: box.cx, y: box.cy + box.h / 2, cur: 'ns-resize', side: true },
+                    { c: 'w', x: box.cx - box.w / 2, y: box.cy, cur: 'ew-resize', side: true },
+                    { c: 'e', x: box.cx + box.w / 2, y: box.cy, cur: 'ew-resize', side: true },
+                  );
+                }
+                return corners.map((k) => {
+                  const horiz = k.c === 'n' || k.c === 's';
+                  const w = k.side ? (horiz ? 12 : 6) : 8;
+                  const h = k.side ? (horiz ? 6 : 12) : 8;
+                  return (
+                    <rect
+                      key={k.c}
+                      x={k.x - (w / 2) * hs}
+                      y={k.y - (h / 2) * hs}
+                      width={w * hs}
+                      height={h * hs}
+                      rx={k.side ? 2 * hs : 0}
+                      fill="#fff"
+                      stroke={HANDLE}
+                      strokeWidth={1.5 * hs}
+                      data-resize={k.c}
+                      data-resize-node={singleNode}
+                      style={{ cursor: k.cur }}
+                    />
+                  );
+                });
               })()}
             {transient.connect && (
               <line

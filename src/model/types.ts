@@ -37,6 +37,11 @@ export type LabelPos = 'center' | 'top' | 'bottom' | 'left' | 'right';
 export const LABEL_POSITIONS: LabelPos[] = ['center', 'top', 'bottom', 'left', 'right'];
 export type RouteKind = 'auto' | 'straight';
 export type SumStyle = 'plain' | 'cross' | 'sigma';
+/** horizontal alignment of the lines of a multi-line label */
+export type TextAlign = 'left' | 'center' | 'right';
+export const TEXT_ALIGNS: TextAlign[] = ['left', 'center', 'right'];
+/** rotation of a node in degrees (multiples of 90) */
+export const ROTATIONS = [0, 90, 180, 270] as const;
 
 export interface Point {
   x: number;
@@ -69,6 +74,16 @@ export interface DNode {
   labelPos?: LabelPos;
   /** manual label shift from its default position (`offset (dx, dy)`), set by dragging the label */
   labelOffset?: Point;
+  /** text style of the whole label (inline <b>/<i>/<u> tags still work inside) */
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  /** font family of this node only */
+  font?: string;
+  /** alignment of the lines of a multi-line label (and of the label inside a block) */
+  textAlign?: TextAlign;
+  /** rotation in degrees: 0 | 90 | 180 | 270 (the shape and its label turn together) */
+  rotate?: number;
 }
 
 /** Embedded images: name -> data URL (`asset name "data:image/png;base64,..."`). */
@@ -101,6 +116,15 @@ export interface DEdge {
   color?: string;
   dash?: DashKind;
   fontSize?: number;
+  /** arrowhead size of this connection only */
+  arrowSize?: number;
+  /** label text style */
+  bold?: boolean;
+  italic?: boolean;
+  font?: string;
+  textAlign?: TextAlign;
+  /** draw a hop where this line crosses an earlier one (default: style.jumpSize > 0); false disables it */
+  jump?: boolean;
 }
 
 /** Per-node-type default appearance (style { circle: size (60, 60) fill #eef }) */
@@ -116,9 +140,51 @@ export interface TypeDefaults {
   sumStyle?: SumStyle;
   dash?: DashKind;
   labelPos?: LabelPos;
+  bold?: boolean;
+  italic?: boolean;
+  font?: string;
+  textAlign?: TextAlign;
 }
 
-export const TYPE_DEFAULT_KEYS: (keyof TypeDefaults)[] = ['w', 'h', 'fill', 'stroke', 'color', 'fontSize', 'strokeWidth', 'radius', 'sumStyle', 'dash', 'labelPos'];
+export const TYPE_DEFAULT_KEYS: (keyof TypeDefaults)[] = [
+  'w',
+  'h',
+  'fill',
+  'stroke',
+  'color',
+  'fontSize',
+  'strokeWidth',
+  'radius',
+  'sumStyle',
+  'dash',
+  'labelPos',
+  'bold',
+  'italic',
+  'font',
+  'textAlign',
+];
+
+/** Node fields that the "reset to defaults" commands remove (everything except identity, position, label, picture). */
+export const NODE_STYLE_KEYS: (keyof DNode)[] = [
+  'w',
+  'h',
+  'fill',
+  'stroke',
+  'color',
+  'fontSize',
+  'strokeWidth',
+  'radius',
+  'dash',
+  'bold',
+  'italic',
+  'underline',
+  'font',
+  'textAlign',
+  'labelPos',
+  'labelOffset',
+  'rotate',
+  'flip',
+];
 
 export interface DStyle {
   defaults: Partial<Record<NodeType, TypeDefaults>>;
@@ -128,6 +194,8 @@ export interface DStyle {
   lineColor: string;
   arrow: ArrowKind;
   arrowSize: number;
+  /** radius of the hop drawn where a line crosses an earlier one (0: no hops) */
+  jumpSize: number;
   blockFill: string;
   blockStroke: string;
   blockWidth: number;
@@ -157,6 +225,7 @@ export const DEFAULT_STYLE: DStyle = {
   lineColor: '#222222',
   arrow: 'triangle',
   arrowSize: 10,
+  jumpSize: 6,
   blockFill: '#ffffff',
   blockStroke: '#222222',
   blockWidth: 120,
@@ -192,12 +261,55 @@ export interface ResolvedNode {
   sumStyle: SumStyle;
   dash?: DashKind;
   labelPos: LabelPos;
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+  font: string;
+  textAlign: TextAlign;
+  rotate: number;
+}
+
+/** Text appearance shared by node labels and connection labels. */
+export interface TextAppearance {
+  fontSize: number;
+  color: string;
+  bold: boolean;
+  italic: boolean;
+  font: string;
+  textAlign: TextAlign;
 }
 
 /** Defaults for free text on edges (labels, signs): the "text" type defaults, then the global style. */
-export function edgeTextDefaults(s: DStyle): { fontSize: number; color: string } {
+export function edgeTextDefaults(s: DStyle): TextAppearance {
   const t = s.defaults.text ?? {};
-  return { fontSize: t.fontSize ?? s.fontSize, color: t.color ?? s.textColor };
+  return {
+    fontSize: t.fontSize ?? s.fontSize,
+    color: t.color ?? s.textColor,
+    bold: t.bold ?? false,
+    italic: t.italic ?? false,
+    font: t.font ?? s.font,
+    textAlign: t.textAlign ?? 'center',
+  };
+}
+
+/** Fully resolved text appearance of a connection label. */
+export function resolveEdgeText(e: DEdge, s: DStyle): TextAppearance {
+  const d = edgeTextDefaults(s);
+  return {
+    fontSize: e.fontSize ?? d.fontSize,
+    color: e.color ?? d.color,
+    bold: e.bold ?? d.bold,
+    italic: e.italic ?? d.italic,
+    font: e.font ?? d.font,
+    textAlign: e.textAlign ?? d.textAlign,
+  };
+}
+
+/** Normalize a rotation to 0 | 90 | 180 | 270. */
+export function normRotate(r: number | undefined): number {
+  if (!r) return 0;
+  const v = ((Math.round(r / 90) * 90) % 360 + 360) % 360;
+  return v;
 }
 
 export function resolveNode(n: DNode, s: DStyle): ResolvedNode {
@@ -236,6 +348,12 @@ export function resolveNode(n: DNode, s: DStyle): ResolvedNode {
     sumStyle: n.sumStyle ?? d.sumStyle ?? 'plain',
     dash: n.dash ?? d.dash,
     labelPos: n.labelPos ?? d.labelPos ?? (n.type === 'image' ? 'bottom' : 'center'),
+    bold: n.bold ?? d.bold ?? false,
+    italic: n.italic ?? d.italic ?? false,
+    underline: n.underline ?? false,
+    font: n.font ?? d.font ?? s.font,
+    textAlign: n.textAlign ?? d.textAlign ?? 'center',
+    rotate: normRotate(n.rotate),
   };
 }
 

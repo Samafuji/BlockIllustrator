@@ -97,6 +97,14 @@ export function App() {
         st.duplicateSelection();
         return;
       }
+      if (mod && !e.shiftKey && (key === 'b' || key === 'i' || key === 'u')) {
+        // text style of the selection (nodes, lines, line labels)
+        const sel = st.selection;
+        if (sel.nodes.length + sel.edges.length + sel.labels.length === 0) return;
+        e.preventDefault();
+        st.toggleTextStyle(key === 'b' ? 'bold' : key === 'i' ? 'italic' : 'underline');
+        return;
+      }
       if (mod && key === 'a') {
         e.preventDefault();
         // Ctrl+Shift+A: every piece of text (text nodes + line labels), e.g. to line them up

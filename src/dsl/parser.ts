@@ -14,6 +14,8 @@ import {
   STYLE_KEYS,
   Side,
   StyleKey,
+  TEXT_ALIGNS,
+  TextAlign,
   TypeDefaults,
 } from '../model/types';
 import { t as tr } from '../i18n';
@@ -416,6 +418,31 @@ interface AttrTarget extends TypeDefaults {
   flip?: boolean;
   hidden?: boolean;
   src?: string;
+  underline?: boolean;
+  rotate?: number;
+}
+
+/** `align left|center|right` (also accepts l / c / r). */
+function readTextAlign(c: Cursor): TextAlign {
+  const v = c.expectIdent(tr('align の位置 (left|center|right)')).toLowerCase();
+  const map: Record<string, TextAlign> = { l: 'left', c: 'center', r: 'right', centre: 'center', middle: 'center' };
+  const a = (map[v] ?? v) as TextAlign;
+  if (!TEXT_ALIGNS.includes(a)) throw new Error(tr('align は {v} のいずれかです', { v: TEXT_ALIGNS.join(' | ') }));
+  return a;
+}
+
+/** `font "Times New Roman, serif"` (an unquoted name runs to the end of the attribute list). */
+function readFont(c: Cursor): string {
+  const t = c.next();
+  if (!t) throw new Error(tr('font の後にフォント名が必要です'));
+  if (t.kind === 'str') return t.value;
+  if (t.kind !== 'ident') throw new Error(tr('font の後にフォント名が必要です'));
+  let v = t.value;
+  while (c.peek()?.kind === 'ident' || c.isPunct(',')) {
+    const n = c.next()!;
+    v += n.kind === 'punct' ? ',' : ' ' + n.value;
+  }
+  return v;
 }
 
 /** Parse `size (w, h) fill #.. stroke #.. ...` attributes. Returns whether a position was given. */
@@ -523,6 +550,41 @@ function parseAttrs(o: AttrTarget, c: Cursor, opts: { allowPosition: boolean; st
         const v = c.next();
         if (!v || (v.kind !== 'ident' && v.kind !== 'str')) throw new Error(tr('src の後にアセット名か URL が必要です'));
         o.src = v.value;
+        break;
+      }
+      case 'bold':
+      case 'b':
+        o.bold = true;
+        break;
+      case 'italic':
+      case 'i':
+        o.italic = true;
+        break;
+      case 'underline':
+      case 'u':
+        nodeOnly(t);
+        o.underline = true;
+        break;
+      case 'normal':
+        o.bold = false;
+        o.italic = false;
+        break;
+      case 'font':
+      case 'font-family':
+      case 'fontfamily':
+        o.font = readFont(c);
+        break;
+      case 'align':
+      case 'textalign':
+      case 'text-align':
+        o.textAlign = readTextAlign(c);
+        break;
+      case 'rotate':
+      case 'rotation': {
+        nodeOnly(t);
+        const r = c.expectNum(tr('回転角 (0 / 90 / 180 / 270)'));
+        if (r % 90 !== 0) throw new Error(tr('rotate は 90 の倍数で指定してください'));
+        o.rotate = ((r % 360) + 360) % 360;
         break;
       }
       default:
@@ -643,6 +705,36 @@ function parseEdge(c: Cursor): Omit<DEdge, 'id'> {
       case 'fontsize':
       case 'font-size':
         edge.fontSize = c.expectNum();
+        break;
+      case 'arrowsize':
+      case 'arrow-size':
+        edge.arrowSize = c.expectNum();
+        break;
+      case 'bold':
+      case 'b':
+        edge.bold = true;
+        break;
+      case 'italic':
+      case 'i':
+        edge.italic = true;
+        break;
+      case 'font':
+      case 'font-family':
+      case 'fontfamily':
+        edge.font = readFont(c);
+        break;
+      case 'align':
+      case 'textalign':
+      case 'text-align':
+        edge.textAlign = readTextAlign(c);
+        break;
+      case 'jump':
+      case 'hop':
+        edge.jump = true;
+        break;
+      case 'nojump':
+      case 'nohop':
+        edge.jump = false;
         break;
       default:
         throw new Error(tr("未知の属性: '{v}'", { v: t.value }));

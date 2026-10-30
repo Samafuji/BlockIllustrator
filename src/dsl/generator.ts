@@ -35,7 +35,14 @@ function colorTok(c: string): string {
 }
 
 /** Attribute text shared by node lines and per-type defaults in the style block. */
-export function attrParts(o: TypeDefaults & { flip?: boolean; hidden?: boolean; labelOffset?: Point }, type: NodeType): string[] {
+function fontTok(f: string): string {
+  return /^[A-Za-z][A-Za-z0-9_-]*$/.test(f) ? f : quote(f);
+}
+
+export function attrParts(
+  o: TypeDefaults & { flip?: boolean; hidden?: boolean; labelOffset?: Point; underline?: boolean; rotate?: number },
+  type: NodeType,
+): string[] {
   const parts: string[] = [];
   if (o.w !== undefined || o.h !== undefined) {
     if (type === 'sum' || type === 'junction') {
@@ -58,6 +65,12 @@ export function attrParts(o: TypeDefaults & { flip?: boolean; hidden?: boolean; 
   if (o.dash !== undefined && o.dash !== 'solid') parts.push(o.dash);
   if (o.labelPos !== undefined) parts.push(`caption ${o.labelPos}`);
   if (o.labelOffset) parts.push(`offset (${fmtNum(o.labelOffset.x)}, ${fmtNum(o.labelOffset.y)})`);
+  if (o.bold) parts.push('bold');
+  if (o.italic) parts.push('italic');
+  if (o.underline) parts.push('underline');
+  if (o.font !== undefined) parts.push(`font ${fontTok(o.font)}`);
+  if (o.textAlign !== undefined) parts.push(`align ${o.textAlign}`);
+  if (o.rotate) parts.push(`rotate ${fmtNum(o.rotate)}`);
   return parts;
 }
 
@@ -113,6 +126,13 @@ export function edgeToLine(e: DEdge): string {
   if (e.dash !== undefined && e.dash !== 'solid') parts.push(e.dash);
   if (e.route === 'straight') parts.push('straight');
   if (e.fontSize !== undefined) parts.push(`fontSize ${fmtNum(e.fontSize)}`);
+  if (e.arrowSize !== undefined) parts.push(`arrowSize ${fmtNum(e.arrowSize)}`);
+  if (e.bold) parts.push('bold');
+  if (e.italic) parts.push('italic');
+  if (e.font !== undefined) parts.push(`font ${fontTok(e.font)}`);
+  if (e.textAlign !== undefined) parts.push(`align ${e.textAlign}`);
+  if (e.jump === true) parts.push('jump');
+  else if (e.jump === false) parts.push('nojump');
   return parts.join(' ');
 }
 

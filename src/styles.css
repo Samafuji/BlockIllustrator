@@ -37,7 +37,7 @@ textarea {
 
 .app {
   display: grid;
-  grid-template-rows: auto 1fr var(--status-h);
+  grid-template-rows: auto auto 1fr var(--status-h);
   height: 100%;
 }
 
@@ -216,6 +216,154 @@ textarea {
 }
 .btn.caret.active {
   color: #1b57a8;
+}
+
+/* ---------------------------------------------------------------- format bar */
+.formatbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  padding: 3px 8px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  position: relative;
+  z-index: 29;
+}
+.formatbar .sep {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  margin: 0 2px;
+}
+.btn.icon {
+  width: 28px;
+  padding: 0;
+  justify-content: center;
+  color: #334155;
+}
+.btn.icon.txt {
+  font-weight: 600;
+  font-size: 13px;
+}
+.btn.icon svg {
+  display: block;
+}
+.btn.icon:disabled {
+  opacity: 0.35;
+}
+.fmt-size {
+  width: 52px;
+  height: 28px;
+  padding: 2px 4px;
+  border: 1px solid var(--border);
+  border-radius: 0;
+  margin-left: -1px;
+  text-align: center;
+  background: #fff;
+}
+.fmt-size:disabled {
+  opacity: 0.45;
+}
+.fmt-font {
+  height: 28px;
+  max-width: 190px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+}
+.fmt-font:disabled {
+  opacity: 0.45;
+}
+.fmt-hint {
+  margin-left: 6px;
+}
+
+/* color palettes */
+.palette-list {
+  min-width: 232px;
+  padding: 8px;
+  cursor: default;
+}
+.palette-pop .swatches {
+  display: grid;
+  grid-template-columns: repeat(7, 26px);
+  gap: 4px;
+}
+.swatch {
+  width: 26px;
+  height: 22px;
+  border: 1px solid rgba(15, 23, 42, 0.25);
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 0;
+}
+.swatch:hover {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.swatch.on {
+  outline: 2px solid #1b57a8;
+  outline-offset: 1px;
+}
+.custom-color {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  flex: 1;
+}
+.custom-color input[type='color'] {
+  width: 30px;
+  height: 26px;
+  padding: 0 2px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+}
+.palette-pop .row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.palette-pop .row .btn {
+  height: 26px;
+  padding: 0 6px;
+  font-size: 12px;
+}
+.swatch-cur {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  border: 1px solid rgba(15, 23, 42, 0.3);
+}
+.menu.swatch-btn .btn.icon {
+  width: 30px;
+}
+.markup-tools {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 3px;
+}
+.markup-tools .btn.icon {
+  width: 24px;
+  height: 22px;
+}
+.markup-tools .menu .btn.icon {
+  width: 36px;
+  gap: 2px;
+}
+.markup-tools .menu .btn.icon .swatch-cur {
+  width: 10px;
+  height: 10px;
+}
+.markup-tools .btn.icon .txt {
+  font-weight: 600;
 }
 
 /* ---------------------------------------------------------------- layout */

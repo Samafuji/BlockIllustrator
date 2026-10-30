@@ -11,7 +11,8 @@
   行の間隔は 100〜120。入力テキストは左端、出力テキストは右端。
 - 文字列は `"..."`。改行は `\n`。`$...$` の中は LaTeX 数式（例: `"Plant\n$P(s)$"`, `"$\frac{1}{s+1}$"`）。
   数式内のバックスラッシュはそのまま 1 本で書く（`\\` にしない）。
-- ラベル内の装飾: `<b>太字</b>`, `<small>小さい文字</small>`, `<i>斜体</i>`。
+- ラベル内の装飾（一部だけ変える）: `<b>太字</b>`, `<i>斜体</i>`, `<u>下線</u>`, `<small>小さい文字</small>`, `<big>大きい文字</big>`,
+  `<color #d0353c>色付き</color>`。ラベル全体を太字などにするときは属性 `bold` / `italic` / `underline` を使う。
 - ID は英字で始まる英数字と `_`。重複不可。
 - **ノードを先に全部定義してから接続線を書く**（接続線は定義済み ID のみ参照できる）。
 
@@ -39,6 +40,7 @@ style {
   textColor: #111111
   arrow: triangle          // triangle | open | none | dot
   arrowSize: 10
+  jumpSize: 6              // 線が交差する所のジャンプ（跨ぎ）の半径。0 で描かない。後に書いた線が先の線を跨ぐ
   blockFill: #ffffff
   blockStroke: #222222
   blockWidth: 120
@@ -55,6 +57,7 @@ style {
   block: size (140, 60) fill #eef6ff stroke #2b7de9
   circle: size (60, 60)
   text: fontSize 12 color #555      // テキストノードと線ラベル・符号に適用
+  block: bold font "Times New Roman, serif" align left   // 文字スタイルの既定も種類ごとに指定できる
 }
 ```
 
@@ -90,6 +93,10 @@ hidden             junction の点を描かない
 plain|cross|sigma  sum の表示
 src host_pc        image の画像（埋め込み画像の名前か URL）
 caption right      ラベルの位置: center | top | bottom | left | right（image は既定で bottom、他は center）
+bold | italic | underline   ラベル全体の文字スタイル
+font "Times New Roman, serif"   このノードだけのフォント
+align left         複数行ラベルの行揃え: left | center | right（ブロック内では文字も左/右端に寄る）
+rotate 90          図形とラベルを回転: 0 | 90 | 180 | 270（gain を下向き・上向きにするときなど）
 ```
 
 ## 5. 接続線
@@ -114,6 +121,11 @@ color #rrggbb            線とラベルの色
 dashed | dotted          線種
 straight                 直交ではなく直線で結ぶ（角度は 0 / 30 / 45 / 60 / 90° に自動で揃う）
 fontSize 12              ラベルの文字サイズ
+arrowSize 14             この線だけの矢印の大きさ（既定は style の arrowSize）
+bold | italic            ラベルの文字スタイル
+font "Georgia, serif"    ラベルのフォント
+align left               複数行ラベルの行揃え
+jump | nojump            交差する所で跨ぐ / 跨がない（既定は style の jumpSize に従う）
 ```
 
 ### 配線のルール
@@ -128,6 +140,7 @@ fontSize 12              ラベルの文字サイズ
 - グループ枠（点線の囲い）は `block grp "" at (cx, cy) size (w, h) fill none stroke #666 dashed`
   を **他のノードより先に** 書く（先に書いたものが背面）。タイトルは `text` ノードで置く。
 - 複数行ラベルの 2 行目を小さくしたい場合: `"<b>Controller</b>\n<small>PID</small>"`。
+- 線が交差する場合、後に書いた線が自動で跨ぐ（ジャンプ）ので、跨がせたい線（フィードバックなど）を後に書く。
 
 ## 6. 完全な例（標準フィードバック制御系）
 

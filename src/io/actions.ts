@@ -3,7 +3,7 @@ import { create } from 'zustand';
 import { EXAMPLES } from '../examples';
 import { useStore } from '../store/useStore';
 import { canvasApi } from '../editor/canvasApi';
-import { openFile, save, saveAs } from './files';
+import { hasFsAccess, openFile, save, saveAs, saveExport, saveToHandle } from './files';
 import {
   baseName,
   copyPngToClipboard,
@@ -90,11 +90,44 @@ function name(): string {
   return baseName(useStore.getState().fileName);
 }
 
+/**
+ * Export a picture and keep the diagram file in step with it:
+ *  - a diagram that has no file yet is saved first (so the picture can go next to it;
+ *    cancelling that still exports),
+ *  - the picture's save dialog opens in the diagram's folder,
+ *  - afterwards unsaved changes of the diagram are written to its file.
+ */
+async function exportPicture(run: (deliver: (blob: Blob, fileName: string) => Promise<void>) => Promise<void>) {
+  await guard(async () => {
+    let st = useStore.getState();
+    if (!st.fileHandle && hasFsAccess()) {
+      const ref = await saveAs(st.serialize(), st.fileName ?? 'diagram.bd');
+      if (ref) {
+        st.markSaved(ref.name, ref.handle);
+        toast(t('{name} に保存しました', { name: ref.name }));
+      }
+      st = useStore.getState();
+    }
+    const handle = st.fileHandle;
+    let outcome: { saved: boolean; picked: boolean } | null = null;
+    await run(async (blob, fileName) => {
+      outcome = await saveExport(blob, fileName, handle);
+      if (outcome.saved) toast(outcome.picked ? t('{name} に保存しました', { name: fileName }) : t('{name} をダウンロードしました', { name: fileName }));
+    });
+    // the diagram file follows its exports
+    const after = useStore.getState();
+    if (outcome && (outcome as { saved: boolean }).saved && after.fileHandle && after.dirty) {
+      await saveToHandle(after.fileHandle, after.serialize());
+      after.markSaved(after.fileName ?? 'diagram.bd', after.fileHandle);
+    }
+  });
+}
+
 export const exportActions = {
-  svg: () => guard(() => exportSvgFile(useStore.getState().diagram, name())),
-  png: (scale: number) => guard(() => exportPngFile(useStore.getState().diagram, name(), scale)),
-  pdf: () => guard(() => exportPdfFile(useStore.getState().diagram, name())),
-  eps: () => guard(() => exportEpsFile(useStore.getState().diagram, name())),
+  svg: () => exportPicture((deliver) => exportSvgFile(useStore.getState().diagram, name(), deliver)),
+  png: (scale: number) => exportPicture((deliver) => exportPngFile(useStore.getState().diagram, name(), scale, deliver)),
+  pdf: () => exportPicture((deliver) => exportPdfFile(useStore.getState().diagram, name(), deliver)),
+  eps: () => exportPicture((deliver) => exportEpsFile(useStore.getState().diagram, name(), deliver)),
   print: () => guard(() => printDiagram(useStore.getState().diagram, name())),
   copyPng: (scale: number) =>
     guard(async () => {

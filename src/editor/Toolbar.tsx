@@ -4,6 +4,7 @@ import { LANGS, Lang, useLang, useT } from '../i18n';
 import { exportActions, loadExample, newDiagram, openDiagram, saveDiagram } from '../io/actions';
 import { useStore } from '../store/useStore';
 import { canvasApi } from './canvasApi';
+import { FormatBar } from './FormatBar';
 
 export function Menu({
   label,
@@ -75,6 +76,7 @@ export function Toolbar() {
   const st = useStore.getState;
 
   return (
+    <>
     <div className="toolbar">
       <span className="brand">Block Illustrator</span>
       <Menu label={t('ファイル')}>
@@ -156,8 +158,14 @@ export function Toolbar() {
         <button className="menu-item" onClick={() => st().distributeSelection('y')} disabled={selCount < 3}>
           {t('縦に等間隔')} <small>Alt+Shift+V</small>
         </button>
-        <button className="menu-item" onClick={() => st().sameSizeSelection()} disabled={selCount < 2}>
-          {t('サイズを最初の図形に揃える')}
+        <button className="menu-item" onClick={() => st().matchSelection('size')} disabled={selCount < 2}>
+          {t('サイズを基準の図形に揃える')}
+        </button>
+        <button className="menu-item" onClick={() => st().matchSelection('all')} disabled={selCount < 2}>
+          {t('スタイルを基準の図形に揃える')}
+        </button>
+        <button className="menu-item" onClick={() => st().resetSelection()} disabled={!hasSel}>
+          {t('既定に戻す')}
         </button>
       </Menu>
       <span className="sep" />
@@ -226,5 +234,7 @@ export function Toolbar() {
         </button>
       </Menu>
     </div>
+    <FormatBar />
+    </>
   );
 }

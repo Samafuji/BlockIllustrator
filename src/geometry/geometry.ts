@@ -48,16 +48,18 @@ export function anchorOnSide(b: Box, side: Side, along?: number): Point {
   const hw = w / 2;
   const hh = h / 2;
   if (node.type === 'gain') {
-    const dir = node.flip ? -1 : 1;
+    // the triangle is full-size along its pointing axis and half-size at the center across it
+    const r = ((((node.rotate ?? 0) % 360) + 360) % 360 + (node.flip ? 180 : 0)) % 360;
+    const vertical = r === 90 || r === 270;
     switch (side) {
       case 'left':
-        return dir > 0 ? { x: cx - hw, y: cy } : { x: cx - hw, y: cy };
+        return { x: cx - (vertical ? hw / 2 : hw), y: cy };
       case 'right':
-        return { x: cx + hw, y: cy };
+        return { x: cx + (vertical ? hw / 2 : hw), y: cy };
       case 'top':
-        return { x: cx, y: cy - hh / 2 };
+        return { x: cx, y: cy - (vertical ? hh : hh / 2) };
       case 'bottom':
-        return { x: cx, y: cy + hh / 2 };
+        return { x: cx, y: cy + (vertical ? hh : hh / 2) };
     }
   }
   const circular = node.type === 'sum' || node.type === 'junction' || node.type === 'circle';
@@ -436,6 +438,23 @@ export function polylineMid(pts: Point[]): { p: Point; dir: Point } {
 }
 
 /** "Left-hand" perpendicular used for default label / sign placement (above for left-to-right). */
+/**
+ * Proper crossing of two segments (not touching at an end). Returns the point and
+ * the parameter `t` along a->b.
+ */
+export function segmentCrossing(a: Point, b: Point, c: Point, d: Point): { p: Point; t: number } | null {
+  const r = { x: b.x - a.x, y: b.y - a.y };
+  const q = { x: d.x - c.x, y: d.y - c.y };
+  const den = r.x * q.y - r.y * q.x;
+  if (Math.abs(den) < 1e-9) return null; // parallel / collinear
+  const ac = { x: c.x - a.x, y: c.y - a.y };
+  const t = (ac.x * q.y - ac.y * q.x) / den;
+  const u = (ac.x * r.y - ac.y * r.x) / den;
+  const eps = 1e-6;
+  if (t <= eps || t >= 1 - eps || u <= eps || u >= 1 - eps) return null;
+  return { p: { x: a.x + r.x * t, y: a.y + r.y * t }, t };
+}
+
 export function perpLeft(dir: Point): Point {
   return { x: dir.y, y: -dir.x };
 }
