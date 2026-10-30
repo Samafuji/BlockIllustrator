@@ -246,8 +246,10 @@ function inheritedAttr(el: Element | null, name: string): string | null {
   return null;
 }
 
-/** Points along a shape (local coordinates) through the browser's path measurement. */
-function shapeGeometry(inner: XMLDocument, shape: Element): { len: number; at: (d: number) => { x: number; y: number }; vertices: { x: number; y: number }[] } | null {
+type Pt = { x: number; y: number };
+
+/** Start / end points and tangent directions of a shape (local coordinates) through the browser's path measurement. */
+function shapeGeometry(shape: Element): { len: number; start: Pt; startDir: number; end: Pt; endDir: number; vertices: Pt[] } | null {
   const host = document.createElementNS(SVG_NS, 'svg');
   host.setAttribute('width', '0');
   host.setAttribute('height', '0');
@@ -261,19 +263,23 @@ function shapeGeometry(inner: XMLDocument, shape: Element): { len: number; at: (
     const geo = live as unknown as { getTotalLength?: () => number; getPointAtLength?: (d: number) => { x: number; y: number } };
     if (typeof geo.getTotalLength !== 'function' || typeof geo.getPointAtLength !== 'function') return null;
     const len = geo.getTotalLength();
-    if (!isFinite(len)) return null;
-    const pts: { x: number; y: number }[] = [];
-    for (let i = 0; i <= 64; i++) {
-      const p = geo.getPointAtLength((len * i) / 64);
-      pts.push({ x: p.x, y: p.y });
-    }
-    const vertices: { x: number; y: number }[] = [];
+    if (!isFinite(len) || len <= 0) return null;
+    const at = (d: number): Pt => {
+      const p = geo.getPointAtLength!(Math.max(0, Math.min(len, d)));
+      return { x: p.x, y: p.y };
+    };
+    const angle = (a: Pt, b: Pt) => (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
+    // tangent from a short step along the path (short enough to follow curves)
+    const eps = Math.min(0.5, len / 10);
+    const start = at(0);
+    const end = at(len);
+    const vertices: Pt[] = [];
     const tag = shape.localName;
     if (tag === 'polyline' || tag === 'polygon') {
       const nums = (shape.getAttribute('points') || '').trim().split(/[\s,]+/).map(Number);
       for (let i = 0; i + 1 < nums.length; i += 2) vertices.push({ x: nums[i], y: nums[i + 1] });
     }
-    return { len, at: (d: number) => pts[Math.max(0, Math.min(64, Math.round((d / len) * 64)))], vertices };
+    return { len, start, startDir: angle(start, at(eps)), end, endDir: angle(at(len - eps), end), vertices };
   } catch {
     return null;
   } finally {
@@ -300,23 +306,22 @@ function expandMarkers(inner: XMLDocument) {
     if (!refs.some(Boolean)) continue;
     const parent = shape.parentNode;
     if (!parent) continue;
-    const geo = shapeGeometry(inner, shape);
+    const geo = shapeGeometry(shape);
     for (const p of PROPS) shape.removeAttribute(p);
     shape.removeAttribute('marker');
-    if (!geo || geo.len <= 0) continue;
-    const eps = Math.min(1, geo.len / 10);
-    const angle = (a: { x: number; y: number }, b: { x: number; y: number }) => (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
+    if (!geo) continue;
+    const angle = (a: Pt, b: Pt) => (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
     const strokeWidth = parseFloat(inheritedAttr(shape, 'stroke-width') || '1') || 1;
-    const heads: { marker: Element; p: { x: number; y: number }; dir: number; start: boolean }[] = [];
+    const heads: { marker: Element; p: Pt; dir: number; start: boolean }[] = [];
     const [startRef, midRef, endRef] = refs;
-    if (startRef && markers.has(startRef)) heads.push({ marker: markers.get(startRef)!, p: geo.at(0), dir: angle(geo.at(0), geo.at(eps)), start: true });
+    if (startRef && markers.has(startRef)) heads.push({ marker: markers.get(startRef)!, p: geo.start, dir: geo.startDir, start: true });
     if (midRef && markers.has(midRef)) {
       for (let i = 1; i + 1 < geo.vertices.length; i++) {
         const v = geo.vertices[i];
         heads.push({ marker: markers.get(midRef)!, p: v, dir: (angle(geo.vertices[i - 1], v) + angle(v, geo.vertices[i + 1])) / 2, start: false });
       }
     }
-    if (endRef && markers.has(endRef)) heads.push({ marker: markers.get(endRef)!, p: geo.at(geo.len), dir: angle(geo.at(geo.len - eps), geo.at(geo.len)), start: false });
+    if (endRef && markers.has(endRef)) heads.push({ marker: markers.get(endRef)!, p: geo.end, dir: geo.endDir, start: false });
     if (!heads.length) continue;
     const wrap = inner.createElementNS(SVG_NS, 'g');
     const shapeTr = shape.getAttribute('transform');
