@@ -24,7 +24,7 @@ import { AlignMode, MatchWhat, referenceNodeId, useStore } from '../store/useSto
 import { fitNodeToImage, replaceNodeImage } from '../io/images';
 import { ColorPopoverButton, toHex } from './ColorPicker';
 import { FONT_PRESETS } from './fonts';
-import { IcBold, IcItalic, IcTextCenter, IcTextLeft, IcTextRight, IcUnderline } from './icons';
+import { IcBackward, IcBold, IcForward, IcItalic, IcTextCenter, IcTextLeft, IcTextRight, IcToBack, IcToFront, IcUnderline } from './icons';
 
 // ---------------------------------------------------------------- fields
 
@@ -234,6 +234,31 @@ function TextStyleRow({
             </button>
           ))}
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** Drawing order of the selection (the order of the statements in the code). */
+function ZOrderRow() {
+  const t = useT();
+  const go = (how: 'front' | 'back' | 'forward' | 'backward') => useStore.getState().reorderSelection(how);
+  return (
+    <div className="field">
+      <label>{t('重なり順')}</label>
+      <div className="btn-group">
+        <button type="button" className="btn icon" title={t('最前面へ') + ' (Ctrl+Shift+])'} onClick={() => go('front')}>
+          <IcToFront />
+        </button>
+        <button type="button" className="btn icon" title={t('前面へ（一段）') + ' (Ctrl+])'} onClick={() => go('forward')}>
+          <IcForward />
+        </button>
+        <button type="button" className="btn icon" title={t('背面へ（一段）') + ' (Ctrl+[)'} onClick={() => go('backward')}>
+          <IcBackward />
+        </button>
+        <button type="button" className="btn icon" title={t('最背面へ') + ' (Ctrl+Shift+[)'} onClick={() => go('back')}>
+          <IcToBack />
+        </button>
       </div>
     </div>
   );
@@ -480,6 +505,7 @@ const HELP_ITEMS: string[] = [
   '複数選択では最後に選択した図形が「基準」（太い枠）。他の図形のサイズやスタイルを基準に揃えられます',
   'ラベルの一部だけ書式を変えるには、ラベル欄で文字を選択して B / I / U / 色のボタンを押します（<b>…</b> などのタグ）',
   '線が交差するところには自動でジャンプ（跨ぎ）が描かれます（全体スタイルのジャンプ半径で調整、0 で無効）',
+  '重なり順: 書式バーの最前面/最背面ボタン、または Ctrl+] / Ctrl+[（Shift で最前面 / 最背面）。コードでは後に書いたものが前に描かれます',
   'Alt を押しながらドラッグするとグリッド・整列ガイド・角度のスナップを一時的に解除して自由に動かせます。矢印キーで 1px、Shift+矢印でグリッド単位の微調整',
   'ノード上の青い○ (ポート) から別ノードへドラッグで接続。または「接続」モード (C)',
   '線を選択 → ▬ で区間移動、■ で曲がり角移動、○ で曲がり角追加。線をダブルクリックで分岐点',
@@ -682,6 +708,7 @@ function NodeInspector({ node }: { node: DNode }) {
           {t('削除')}
         </button>
       </div>
+      <ZOrderRow />
       <p className="muted">{t('接続を作るには、ノードにカーソルを合わせて現れる青い○（ポート）から別のノードへドラッグします。')}</p>
     </div>
   );
@@ -849,6 +876,7 @@ function EdgeInspector({ edge }: { edge: DEdge }) {
           {t('接続線を削除')}
         </button>
       </div>
+      <ZOrderRow />
     </div>
   );
 }
@@ -989,6 +1017,7 @@ function MultiInspector({ ids, labelIds }: { ids: string[]; labelIds: string[] }
           {t('削除')}
         </button>
       </div>
+      <ZOrderRow />
     </div>
   );
 }

@@ -97,6 +97,13 @@ export function App() {
         st.duplicateSelection();
         return;
       }
+      if (mod && (e.key === ']' || e.key === '[' || e.key === '}' || e.key === '{')) {
+        // drawing order: Ctrl+] / Ctrl+[ one step, with Shift to the very front / back
+        e.preventDefault();
+        const front = e.key === ']' || e.key === '}';
+        st.reorderSelection(e.shiftKey ? (front ? 'front' : 'back') : front ? 'forward' : 'backward');
+        return;
+      }
       if (mod && !e.shiftKey && (key === 'b' || key === 'i' || key === 'u')) {
         // text style of the selection (nodes, lines, line labels)
         const sel = st.selection;

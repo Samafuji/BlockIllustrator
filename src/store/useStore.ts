@@ -173,6 +173,8 @@ export interface StoreState {
   toggleTextStyle: (key: 'bold' | 'italic' | 'underline') => void;
   /** turn the selected nodes by ±90° */
   rotateSelection: (delta: 90 | -90) => void;
+  /** drawing order of the selected nodes and lines (later = in front): to the front / back, or one step */
+  reorderSelection: (how: 'front' | 'back' | 'forward' | 'backward') => void;
 }
 
 export type MatchWhat = 'size' | 'style' | 'text' | 'all';
@@ -978,6 +980,39 @@ export const useStore = create<StoreState>((set, get) => {
           if (v === !!def) delete e[key];
           else e[key] = v;
         }
+      });
+    },
+
+    reorderSelection(how) {
+      const sel = get().selection;
+      const nodeIds = new Set(sel.nodes);
+      const edgeIds = new Set([...sel.edges, ...sel.labels]);
+      if (nodeIds.size + edgeIds.size === 0) return;
+      const move = <T extends { id: string }>(list: T[], ids: Set<string>): T[] => {
+        if (ids.size === 0 || ids.size === list.length) return list;
+        const picked = list.filter((x) => ids.has(x.id));
+        const rest = list.filter((x) => !ids.has(x.id));
+        if (how === 'front') return [...rest, ...picked];
+        if (how === 'back') return [...picked, ...rest];
+        // one step: swap the block of selected items with its nearest unselected neighbour
+        const first = list.findIndex((x) => ids.has(x.id));
+        const last = list.length - 1 - [...list].reverse().findIndex((x) => ids.has(x.id));
+        if (how === 'forward') {
+          const nb = list.slice(last + 1).find((x) => !ids.has(x.id));
+          if (!nb) return list;
+          const out = list.filter((x) => !ids.has(x.id));
+          out.splice(out.indexOf(nb) + 1, 0, ...picked);
+          return out;
+        }
+        const nb = list.slice(0, first).reverse().find((x) => !ids.has(x.id));
+        if (!nb) return list;
+        const out = list.filter((x) => !ids.has(x.id));
+        out.splice(out.indexOf(nb), 0, ...picked);
+        return out;
+      };
+      get().commit((d) => {
+        d.nodes = move(d.nodes, nodeIds);
+        d.edges = move(d.edges, edgeIds);
       });
     },
 

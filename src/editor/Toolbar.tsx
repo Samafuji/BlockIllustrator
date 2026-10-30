@@ -167,6 +167,19 @@ export function Toolbar() {
         <button className="menu-item" onClick={() => st().resetSelection()} disabled={!hasSel}>
           {t('既定に戻す')}
         </button>
+        <div className="menu-sep" />
+        <button className="menu-item" onClick={() => st().reorderSelection('front')} disabled={!hasSel}>
+          {t('最前面へ')} <small>Ctrl+Shift+]</small>
+        </button>
+        <button className="menu-item" onClick={() => st().reorderSelection('forward')} disabled={!hasSel}>
+          {t('前面へ（一段）')} <small>Ctrl+]</small>
+        </button>
+        <button className="menu-item" onClick={() => st().reorderSelection('backward')} disabled={!hasSel}>
+          {t('背面へ（一段）')} <small>Ctrl+[</small>
+        </button>
+        <button className="menu-item" onClick={() => st().reorderSelection('back')} disabled={!hasSel}>
+          {t('最背面へ')} <small>Ctrl+Shift+[</small>
+        </button>
       </Menu>
       <span className="sep" />
       <Menu label={t('表示')} keepOpen>

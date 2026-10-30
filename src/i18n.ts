@@ -442,6 +442,12 @@ const D: Record<string, [string, string]> = {
   '複数選択では最後に選択した図形が「基準」（太い枠）。他の図形のサイズやスタイルを基準に揃えられます': ['With several shapes selected, the last one is the "reference" (thick frame): the others can take its size and style', '多重選取時，最後選取的圖形為「基準」(粗框)，可將其他圖形的大小與樣式統一為基準'],
   'ラベルの一部だけ書式を変えるには、ラベル欄で文字を選択して B / I / U / 色のボタンを押します（<b>…</b> などのタグ）': ['To format part of a label, select the text in the label field and press B / I / U / color (tags such as <b>…</b>)', '要只設定標籤的一部分，在標籤欄選取文字後按 B / I / U / 顏色 (如 <b>…</b> 標籤)'],
   '線が交差するところには自動でジャンプ（跨ぎ）が描かれます（全体スタイルのジャンプ半径で調整、0 で無効）': ['Where lines cross, a hop is drawn automatically (adjust the jump radius in the global style; 0 disables it)', '線條交叉處會自動繪製跳線 (在整體樣式調整跳線半徑，0 為停用)'],
+  '最前面へ': ['Bring to front', '移到最前'],
+  '最背面へ': ['Send to back', '移到最後'],
+  '前面へ（一段）': ['Bring forward', '上移一層'],
+  '背面へ（一段）': ['Send backward', '下移一層'],
+  '重なり順': ['Order', '疊放順序'],
+  '重なり順: 書式バーの最前面/最背面ボタン、または Ctrl+] / Ctrl+[（Shift で最前面 / 最背面）。コードでは後に書いたものが前に描かれます': ['Stacking order: the front/back buttons in the format bar, or Ctrl+] / Ctrl+[ (with Shift: to the very front / back). In the code, later statements are drawn in front', '疊放順序：格式列的最前/最後按鈕，或 Ctrl+] / Ctrl+[ (加 Shift 為最前/最後)。程式碼中後寫的會畫在前面'],
   // ---- parser
   'align の位置 (left|center|right)': ['an alignment (left|center|right)', '對齊位置 (left|center|right)'],
   'align は {v} のいずれかです': ['align must be one of {v}', 'align 必須是 {v} 之一'],

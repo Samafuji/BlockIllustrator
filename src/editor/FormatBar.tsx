@@ -11,7 +11,11 @@ import {
   IcAlignRight,
   IcAlignTop,
   IcAlignVCenter,
+  IcBackward,
   IcBold,
+  IcForward,
+  IcToBack,
+  IcToFront,
   IcDistributeH,
   IcDistributeV,
   IcFillColor,
@@ -242,6 +246,21 @@ export function FormatBar() {
         >
           <IcLineColor color={lineColor} />
         </ColorPopoverButton>
+      </div>
+      <span className="sep" />
+      <div className="btn-group">
+        <IconBtn title={t('最前面へ') + ' (Ctrl+Shift+])'} onClick={() => st().reorderSelection('front')} disabled={!anything}>
+          <IcToFront />
+        </IconBtn>
+        <IconBtn title={t('前面へ（一段）') + ' (Ctrl+])'} onClick={() => st().reorderSelection('forward')} disabled={!anything}>
+          <IcForward />
+        </IconBtn>
+        <IconBtn title={t('背面へ（一段）') + ' (Ctrl+[)'} onClick={() => st().reorderSelection('backward')} disabled={!anything}>
+          <IcBackward />
+        </IconBtn>
+        <IconBtn title={t('最背面へ') + ' (Ctrl+Shift+[)'} onClick={() => st().reorderSelection('back')} disabled={!anything}>
+          <IcToBack />
+        </IconBtn>
       </div>
       <span className="sep" />
       <div className="btn-group">

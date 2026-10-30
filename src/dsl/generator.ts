@@ -214,46 +214,65 @@ export function syncCode(code: string, prev: ParseResult, next: Diagram, opts: S
   const prevNodes = new Map(prev.diagram.nodes.map((n) => [n.id, n]));
   const prevEdges = new Map(prev.diagram.edges.map((e) => [e.id, e]));
 
-  // ---- nodes
-  const usedOld = new Set<string>();
-  const newNodeLines: string[] = [];
-  for (const n of next.nodes) {
-    const oldId = renamed[n.id] ?? n.id;
-    const old = prevNodes.get(oldId);
-    const span = prev.nodeSpans[oldId];
-    if (old && span) {
-      usedOld.add(oldId);
-      if (!deepEqual(old, n)) ops.push({ start: span.start, end: span.end, lines: [nodeToLine(n)] });
+  // The order of the statements is the drawing order (later = in front), so when the
+  // kept statements changed their relative order the whole group is rewritten in place
+  // of the first of them; otherwise only the changed lines are touched.
+  function sync<T>(
+    items: T[],
+    idOf: (x: T) => string,
+    oldOf: (id: string) => T | undefined,
+    spanOf: (id: string) => Span | undefined,
+    toLine: (x: T) => string,
+    oldIds: Iterable<string>,
+  ): string[] {
+    const kept: { oldId: string; span: Span; text: string; changed: boolean }[] = [];
+    const fresh: string[] = [];
+    for (const it of items) {
+      const oldId = idOf(it);
+      const old = oldOf(oldId);
+      const span = spanOf(oldId);
+      if (old && span) kept.push({ oldId, span, text: toLine(it), changed: !deepEqual(old, it) });
+      else fresh.push(toLine(it));
+    }
+    const usedOld = new Set(kept.map((k) => k.oldId));
+    const removed: Span[] = [];
+    for (const id of oldIds) {
+      const span = spanOf(id);
+      if (!usedOld.has(id) && span) removed.push(span);
+    }
+    const inCodeOrder = [...kept].sort((a, b) => a.span.start - b.span.start);
+    const reordered = inCodeOrder.some((k, i) => k !== kept[i]);
+    if (reordered) {
+      // every kept statement is removed, then re-inserted in the new order where the group began
+      for (const k of inCodeOrder) ops.push({ start: k.span.start, end: k.span.end, lines: [] });
+      const at = inCodeOrder[0].span.start;
+      ops.push({ start: at, end: at - 1, lines: kept.map((k) => k.text) });
     } else {
-      newNodeLines.push(nodeToLine(n));
+      for (const k of kept) if (k.changed) ops.push({ start: k.span.start, end: k.span.end, lines: [k.text] });
     }
-  }
-  for (const [id] of prevNodes) {
-    if (!usedOld.has(id)) {
-      const span = prev.nodeSpans[id];
-      if (span) ops.push({ start: span.start, end: span.end, lines: [] });
-    }
+    for (const span of removed) ops.push({ start: span.start, end: span.end, lines: [] });
+    return fresh;
   }
 
+  // ---- nodes
+  const newNodeLines = sync(
+    next.nodes,
+    (n) => renamed[n.id] ?? n.id,
+    (id) => prevNodes.get(id),
+    (id) => prev.nodeSpans[id],
+    nodeToLine,
+    prevNodes.keys(),
+  );
+
   // ---- edges
-  const usedOldEdges = new Set<string>();
-  const newEdgeLines: string[] = [];
-  for (const e of next.edges) {
-    const old = prevEdges.get(e.id);
-    const span = prev.edgeSpans[e.id];
-    if (old && span) {
-      usedOldEdges.add(e.id);
-      if (!deepEqual(old, e)) ops.push({ start: span.start, end: span.end, lines: [edgeToLine(e)] });
-    } else {
-      newEdgeLines.push(edgeToLine(e));
-    }
-  }
-  for (const [id] of prevEdges) {
-    if (!usedOldEdges.has(id)) {
-      const span = prev.edgeSpans[id];
-      if (span) ops.push({ start: span.start, end: span.end, lines: [] });
-    }
-  }
+  const newEdgeLines = sync(
+    next.edges,
+    (e) => e.id,
+    (id) => prevEdges.get(id),
+    (id) => prev.edgeSpans[id],
+    edgeToLine,
+    prevEdges.keys(),
+  );
 
   // ---- assets written inside the code itself (normally they are kept apart, see the store)
   for (const [name, span] of Object.entries(prev.assetSpans)) {

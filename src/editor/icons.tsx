@@ -106,6 +106,40 @@ export const IcRotateRight = (p: P) => (
   </Svg>
 );
 
+// ---- drawing order
+export const IcToFront = (p: P) => (
+  <Svg {...p}>
+    <rect x="1.5" y="5.5" width="8" height="8" fill="none" opacity={0.6} />
+    <rect x="6.5" y="1.5" width="8" height="8" fill="#fff" />
+    <rect x="6.5" y="1.5" width="8" height="8" fill="currentColor" opacity={0.85} stroke="none" />
+  </Svg>
+);
+export const IcToBack = (p: P) => (
+  <Svg {...p}>
+    <rect x="6.5" y="1.5" width="8" height="8" fill="currentColor" opacity={0.3} stroke="none" />
+    <rect x="6.5" y="1.5" width="8" height="8" fill="none" opacity={0.6} />
+    <rect x="1.5" y="5.5" width="8" height="8" fill="#fff" />
+    <rect x="1.5" y="5.5" width="8" height="8" fill="none" />
+  </Svg>
+);
+export const IcForward = (p: P) => (
+  <Svg {...p}>
+    <rect x="1.5" y="5.5" width="8" height="8" fill="none" opacity={0.6} />
+    <rect x="6.5" y="1.5" width="8" height="8" fill="#fff" />
+    <rect x="6.5" y="1.5" width="8" height="8" fill="currentColor" opacity={0.5} stroke="none" />
+    <path d="M10.5 12.5v2.5M9 13.5l1.5-1.5 1.5 1.5" transform="translate(0 -1)" />
+  </Svg>
+);
+export const IcBackward = (p: P) => (
+  <Svg {...p}>
+    <rect x="6.5" y="1.5" width="8" height="8" fill="currentColor" opacity={0.2} stroke="none" />
+    <rect x="6.5" y="1.5" width="8" height="8" fill="none" opacity={0.6} />
+    <rect x="1.5" y="5.5" width="8" height="8" fill="#fff" />
+    <rect x="1.5" y="5.5" width="8" height="8" fill="none" />
+    <path d="M10.5 11v3M9 12.5l1.5 1.5 1.5-1.5" />
+  </Svg>
+);
+
 // ---- text
 export const IcBold = (p: P) => (
   <Svg {...p}>
