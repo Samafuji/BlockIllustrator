@@ -15,11 +15,89 @@ export interface SvgResult {
   h: number;
 }
 
-export function buildSvg(diagram: Diagram): SvgResult {
+/**
+ * Build the SVG document. Pictures that are themselves SVG are normally written
+ * into the document as nested <svg> elements (`inlineSvg`): Word / PowerPoint do not
+ * show an <image> that points at SVG data, and glyph definitions inside such a
+ * picture (MathJax ids) would clash with the diagram's own ones once flattened.
+ */
+export function buildSvg(diagram: Diagram, opts: { inlineSvg?: boolean } = {}): SvgResult {
   const layout = layoutDiagram(diagram);
   const size = exportSize(layout);
-  const markup = renderToStaticMarkup(createElement(ExportSvg, { layout }));
+  let markup = renderToStaticMarkup(createElement(ExportSvg, { layout }));
+  if (opts.inlineSvg !== false && /data:image\/svg\+xml/i.test(markup)) markup = inlineSvgImages(markup);
   return { svg: '<?xml version="1.0" encoding="UTF-8"?>\n' + markup, w: size.w, h: size.h };
+}
+
+/** Decode a data URL (base64 or percent-encoded) to text. */
+function dataUrlText(url: string): string | null {
+  const m = /^data:([^,]*?)(;base64)?,([\s\S]*)$/i.exec(url);
+  if (!m) return null;
+  try {
+    if (m[2]) {
+      const bin = atob(m[3].replace(/\s+/g, ''));
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return new TextDecoder('utf-8').decode(bytes);
+    }
+    return decodeURIComponent(m[3]);
+  } catch {
+    return null;
+  }
+}
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/** Every <image> holding SVG data becomes a nested <svg> with unique ids. */
+export function inlineSvgImages(markup: string): string {
+  const doc = new DOMParser().parseFromString(markup, 'image/svg+xml');
+  if (doc.getElementsByTagName('parsererror').length) return markup;
+  const images = Array.from(doc.getElementsByTagNameNS(SVG_NS, 'image'));
+  let n = 0;
+  let changed = false;
+  for (const img of images) {
+    const href = img.getAttribute('href') || img.getAttributeNS('http://www.w3.org/1999/xlink', 'href') || '';
+    if (!/^data:image\/svg\+xml/i.test(href)) continue;
+    let text = dataUrlText(href);
+    if (!text) continue;
+    n++;
+    // make the picture's ids unique inside the combined document
+    const prefix = `pic${n}-`;
+    const ids = Array.from(new Set(Array.from(text.matchAll(/\sid\s*=\s*["']([^"']+)["']/g), (m) => m[1]))).sort((a, b) => b.length - a.length);
+    for (const id of ids) {
+      const esc = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      text = text
+        .replace(new RegExp(`(\\sid\\s*=\\s*["'])${esc}(["'])`, 'g'), `$1${prefix}${id}$2`)
+        .replace(new RegExp(`#${esc}(?=["')\\s;,}])`, 'g'), `#${prefix}${id}`);
+    }
+    const inner = new DOMParser().parseFromString(text, 'image/svg+xml');
+    const root = inner.documentElement;
+    if (!root || root.localName !== 'svg' || inner.getElementsByTagName('parsererror').length) continue;
+    const nested = doc.createElementNS(SVG_NS, 'svg');
+    for (const a of ['x', 'y', 'width', 'height']) {
+      const v = img.getAttribute(a);
+      if (v !== null) nested.setAttribute(a, v);
+    }
+    let vb = root.getAttribute('viewBox');
+    if (!vb) {
+      const w = parseFloat(root.getAttribute('width') || '');
+      const h = parseFloat(root.getAttribute('height') || '');
+      if (w > 0 && h > 0) vb = `0 0 ${w} ${h}`;
+    }
+    if (vb) nested.setAttribute('viewBox', vb);
+    nested.setAttribute('preserveAspectRatio', img.getAttribute('preserveAspectRatio') || 'xMidYMid meet');
+    nested.setAttribute('overflow', 'visible');
+    // keep the picture's own presentation attributes (font, fill …) and its style
+    for (const a of Array.from(root.attributes)) {
+      if (['x', 'y', 'width', 'height', 'viewBox', 'preserveAspectRatio', 'xmlns', 'version', 'id'].includes(a.name) || a.name.startsWith('xmlns:')) continue;
+      nested.setAttribute(a.name, a.value);
+    }
+    for (const child of Array.from(root.childNodes)) nested.appendChild(doc.importNode(child, true));
+    img.parentNode?.replaceChild(nested, img);
+    changed = true;
+  }
+  if (!changed) return markup;
+  return new XMLSerializer().serializeToString(doc.documentElement);
 }
 
 /** Where an exported file goes: a download by default, or a save dialog (see io/actions). */
@@ -151,7 +229,8 @@ async function decodeImagesForEps(svg: string): Promise<Map<string, RasterImage>
 
 /** EPS (PostScript standard fonts; math is exported as outlines; pictures as RGB rasters). */
 export async function renderEps(diagram: Diagram): Promise<string> {
-  const { svg, w, h } = buildSvg(diagram);
+  // the EPS writer rasterizes <image> elements itself (nested <svg> is not something it draws)
+  const { svg, w, h } = buildSvg(diagram, { inlineSvg: false });
   const images = await decodeImagesForEps(svg);
   return svgToEps(svg, w, h, images);
 }
