@@ -16,10 +16,11 @@ export interface SvgResult {
 }
 
 /**
- * Build the SVG document. Pictures that are themselves SVG are normally written
- * into the document as nested <svg> elements (`inlineSvg`): Word / PowerPoint do not
- * show an <image> that points at SVG data, and glyph definitions inside such a
- * picture (MathJax ids) would clash with the diagram's own ones once flattened.
+ * Build the SVG document. Pictures that are themselves SVG are normally flattened
+ * into the document as plain <g> groups (`inlineSvg`): Word / PowerPoint do not
+ * show an <image> that points at SVG data, and their SVG renderer is unreliable
+ * with nested <svg> viewports and <use> references, so the picture is written as
+ * ordinary paths with its own transform (see `flattenPicture`).
  */
 export function buildSvg(diagram: Diagram, opts: { inlineSvg?: boolean } = {}): SvgResult {
   const layout = layoutDiagram(diagram);
@@ -47,8 +48,9 @@ function dataUrlText(url: string): string | null {
 }
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
+const XLINK_NS = 'http://www.w3.org/1999/xlink';
 
-/** Every <image> holding SVG data becomes a nested <svg> with unique ids. */
+/** Every <image> holding SVG data becomes a flattened <g> group (unique ids, no <use>). */
 export function inlineSvgImages(markup: string): string {
   const doc = new DOMParser().parseFromString(markup, 'image/svg+xml');
   if (doc.getElementsByTagName('parsererror').length) return markup;
@@ -56,48 +58,187 @@ export function inlineSvgImages(markup: string): string {
   let n = 0;
   let changed = false;
   for (const img of images) {
-    const href = img.getAttribute('href') || img.getAttributeNS('http://www.w3.org/1999/xlink', 'href') || '';
+    const href = img.getAttribute('href') || img.getAttributeNS(XLINK_NS, 'href') || '';
     if (!/^data:image\/svg\+xml/i.test(href)) continue;
-    let text = dataUrlText(href);
+    const text = dataUrlText(href);
     if (!text) continue;
-    n++;
-    // make the picture's ids unique inside the combined document
-    const prefix = `pic${n}-`;
-    const ids = Array.from(new Set(Array.from(text.matchAll(/\sid\s*=\s*["']([^"']+)["']/g), (m) => m[1]))).sort((a, b) => b.length - a.length);
-    for (const id of ids) {
-      const esc = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      text = text
-        .replace(new RegExp(`(\\sid\\s*=\\s*["'])${esc}(["'])`, 'g'), `$1${prefix}${id}$2`)
-        .replace(new RegExp(`#${esc}(?=["')\\s;,}])`, 'g'), `#${prefix}${id}`);
-    }
-    const inner = new DOMParser().parseFromString(text, 'image/svg+xml');
-    const root = inner.documentElement;
-    if (!root || root.localName !== 'svg' || inner.getElementsByTagName('parsererror').length) continue;
-    const nested = doc.createElementNS(SVG_NS, 'svg');
-    for (const a of ['x', 'y', 'width', 'height']) {
-      const v = img.getAttribute(a);
-      if (v !== null) nested.setAttribute(a, v);
-    }
-    let vb = root.getAttribute('viewBox');
-    if (!vb) {
-      const w = parseFloat(root.getAttribute('width') || '');
-      const h = parseFloat(root.getAttribute('height') || '');
-      if (w > 0 && h > 0) vb = `0 0 ${w} ${h}`;
-    }
-    if (vb) nested.setAttribute('viewBox', vb);
-    nested.setAttribute('preserveAspectRatio', img.getAttribute('preserveAspectRatio') || 'xMidYMid meet');
-    nested.setAttribute('overflow', 'visible');
-    // keep the picture's own presentation attributes (font, fill …) and its style
-    for (const a of Array.from(root.attributes)) {
-      if (['x', 'y', 'width', 'height', 'viewBox', 'preserveAspectRatio', 'xmlns', 'version', 'id'].includes(a.name) || a.name.startsWith('xmlns:')) continue;
-      nested.setAttribute(a.name, a.value);
-    }
-    for (const child of Array.from(root.childNodes)) nested.appendChild(doc.importNode(child, true));
-    img.parentNode?.replaceChild(nested, img);
+    const num = (a: string) => parseFloat(img.getAttribute(a) || '0') || 0;
+    const group = flattenPicture(doc, text, {
+      x: num('x'),
+      y: num('y'),
+      w: num('width'),
+      h: num('height'),
+      stretch: (img.getAttribute('preserveAspectRatio') || '').trim() === 'none',
+      prefix: `pic${++n}-`,
+    });
+    if (!group) continue;
+    img.parentNode?.replaceChild(group, img);
     changed = true;
   }
   if (!changed) return markup;
   return new XMLSerializer().serializeToString(doc.documentElement);
+}
+
+interface PictureBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** preserveAspectRatio="none" on the <image> */
+  stretch: boolean;
+  /** prefix for the picture's ids (unique within the combined document) */
+  prefix: string;
+}
+
+const STRUCTURAL_ROOT_ATTRS = ['x', 'y', 'width', 'height', 'viewBox', 'preserveAspectRatio', 'xmlns', 'version', 'id', 'role', 'focusable', 'overflow'];
+const DROP_ELEMENTS = new Set(['title', 'desc', 'metadata', 'script']);
+
+const fmt = (v: number) => String(Math.round(v * 10000) / 10000);
+
+/**
+ * Turn an SVG picture into a plain <g> positioned like the <image> it replaces:
+ * the viewBox becomes a translate/scale transform, every <use> is replaced by a
+ * copy of what it points at, ids get the prefix, `currentColor` is resolved and
+ * titles / metadata / data-* attributes are dropped. Only basic elements remain
+ * (paths, shapes, text, groups, transforms), which every SVG importer draws.
+ */
+function flattenPicture(doc: Document, text: string, box: PictureBox): Element | null {
+  // make the picture's ids unique inside the combined document
+  const ids = Array.from(new Set(Array.from(text.matchAll(/\sid\s*=\s*["']([^"']+)["']/g), (m) => m[1]))).sort((a, b) => b.length - a.length);
+  for (const id of ids) {
+    const esc = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    text = text
+      .replace(new RegExp(`(\\sid\\s*=\\s*["'])${esc}(["'])`, 'g'), `$1${box.prefix}${id}$2`)
+      .replace(new RegExp(`#${esc}(?=["')\\s;,}])`, 'g'), `#${box.prefix}${id}`);
+  }
+  const inner = new DOMParser().parseFromString(text, 'image/svg+xml');
+  const root = inner.documentElement;
+  if (!root || root.localName !== 'svg' || inner.getElementsByTagName('parsererror').length) return null;
+
+  // viewBox (or the intrinsic size) -> transform onto the image box
+  let vb: number[] | null = (root.getAttribute('viewBox') || '')
+    .trim()
+    .split(/[\s,]+/)
+    .map(Number);
+  if (vb.length !== 4 || vb.some((v) => !isFinite(v)) || vb[2] <= 0 || vb[3] <= 0) {
+    const w = parseFloat(root.getAttribute('width') || '');
+    const h = parseFloat(root.getAttribute('height') || '');
+    vb = w > 0 && h > 0 ? [0, 0, w, h] : null;
+  }
+  let transform: string;
+  if (vb && box.w > 0 && box.h > 0) {
+    let sx = box.w / vb[2];
+    let sy = box.h / vb[3];
+    let tx = box.x;
+    let ty = box.y;
+    if (!box.stretch) {
+      sx = sy = Math.min(sx, sy);
+      tx += (box.w - vb[2] * sx) / 2;
+      ty += (box.h - vb[3] * sy) / 2;
+    }
+    transform = `translate(${fmt(tx)} ${fmt(ty)}) scale(${fmt(sx)} ${fmt(sy)}) translate(${fmt(-vb[0])} ${fmt(-vb[1])})`;
+  } else {
+    transform = `translate(${fmt(box.x)} ${fmt(box.y)})`;
+  }
+
+  expandUses(inner);
+  dropUnreferencedDefs(inner);
+
+  // currentColor has nothing to inherit from once the root is gone
+  const color = root.getAttribute('color') || /(?:^|;)\s*color\s*:\s*([^;]+)/i.exec(root.getAttribute('style') || '')?.[1]?.trim() || '#000000';
+  for (const el of Array.from(inner.getElementsByTagName('*'))) {
+    if (DROP_ELEMENTS.has(el.localName)) {
+      el.parentNode?.removeChild(el);
+      continue;
+    }
+    for (const a of Array.from(el.attributes)) {
+      if (a.name.startsWith('data-') || a.name.startsWith('aria-') || a.name === 'role' || a.name === 'focusable') el.removeAttribute(a.name);
+      else if (/currentColor/i.test(a.value)) el.setAttribute(a.name, a.value.replace(/currentColor/gi, color));
+    }
+  }
+
+  const g = doc.createElementNS(SVG_NS, 'g');
+  for (const a of Array.from(root.attributes)) {
+    if (STRUCTURAL_ROOT_ATTRS.includes(a.name) || a.name.startsWith('xmlns') || a.name.startsWith('data-') || a.name.startsWith('aria-')) continue;
+    if (a.name === 'style') {
+      // keep presentation declarations; vertical-align etc. mean nothing on a <g>
+      const kept = a.value
+        .split(';')
+        .map((s) => s.trim())
+        .filter((s) => s && !/^(vertical-align|overflow|display|position|margin|padding|width|height)\s*:/i.test(s));
+      if (kept.length) g.setAttribute('style', kept.join('; '));
+      continue;
+    }
+    g.setAttribute(a.name, a.value);
+  }
+  const own = g.getAttribute('transform');
+  g.setAttribute('transform', own ? `${transform} ${own}` : transform);
+  for (const child of Array.from(root.childNodes)) g.appendChild(doc.importNode(child, true));
+  return g;
+}
+
+/** Replace every <use> by a copy of the element it references (repeatedly, for nested uses). */
+function expandUses(inner: XMLDocument) {
+  for (let round = 0; round < 8; round++) {
+    const uses = Array.from(inner.getElementsByTagNameNS(SVG_NS, 'use'));
+    if (!uses.length) return;
+    const byId = new Map<string, Element>();
+    for (const el of Array.from(inner.getElementsByTagName('*'))) {
+      const id = el.getAttribute('id');
+      if (id && !byId.has(id)) byId.set(id, el);
+    }
+    for (const u of uses) {
+      const parent = u.parentNode;
+      if (!parent) continue;
+      const ref = (u.getAttribute('href') || u.getAttributeNS(XLINK_NS, 'href') || '').trim();
+      const target = ref.startsWith('#') ? byId.get(ref.slice(1)) : undefined;
+      if (!target || target === u || target.contains(u)) {
+        parent.removeChild(u);
+        continue;
+      }
+      const g = inner.createElementNS(SVG_NS, 'g');
+      for (const a of Array.from(u.attributes)) {
+        if (a.localName === 'href' || ['x', 'y', 'width', 'height', 'id', 'transform'].includes(a.name)) continue;
+        g.setAttribute(a.name, a.value);
+      }
+      const ux = parseFloat(u.getAttribute('x') || '0') || 0;
+      const uy = parseFloat(u.getAttribute('y') || '0') || 0;
+      const tr = [u.getAttribute('transform') || '', ux || uy ? `translate(${fmt(ux)} ${fmt(uy)})` : ''].filter(Boolean).join(' ');
+      if (tr) g.setAttribute('transform', tr);
+      const copy = target.cloneNode(true) as Element;
+      copy.removeAttribute('id');
+      if (copy.localName === 'symbol' || copy.localName === 'svg') {
+        // a symbol's own viewport is rarely used by exported pictures: keep its children as a group
+        const sg = inner.createElementNS(SVG_NS, 'g');
+        for (const a of Array.from(copy.attributes)) {
+          if (STRUCTURAL_ROOT_ATTRS.includes(a.name) || a.name.startsWith('xmlns')) continue;
+          sg.setAttribute(a.name, a.value);
+        }
+        while (copy.firstChild) sg.appendChild(copy.firstChild);
+        g.appendChild(sg);
+      } else {
+        g.appendChild(copy);
+      }
+      parent.replaceChild(g, u);
+    }
+  }
+  // give up on pathological nesting
+  for (const u of Array.from(inner.getElementsByTagNameNS(SVG_NS, 'use'))) u.parentNode?.removeChild(u);
+}
+
+/** Drop <defs> children (glyph paths of a font cache …) that nothing references any more. */
+function dropUnreferencedDefs(inner: XMLDocument) {
+  const defsList = Array.from(inner.getElementsByTagNameNS(SVG_NS, 'defs'));
+  if (!defsList.length) return;
+  const markup = new XMLSerializer().serializeToString(inner.documentElement);
+  for (const defs of defsList) {
+    for (const el of Array.from(defs.children)) {
+      const id = el.getAttribute('id');
+      if (!id) continue;
+      if (!markup.includes(`#${id}`)) defs.removeChild(el);
+    }
+    if (!defs.children.length) defs.parentNode?.removeChild(defs);
+  }
 }
 
 /** Where an exported file goes: a download by default, or a save dialog (see io/actions). */
