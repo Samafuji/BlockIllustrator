@@ -142,7 +142,10 @@ function flattenPicture(doc: Document, text: string, box: PictureBox): Element |
   }
 
   expandUses(inner);
+  expandMarkers(inner);
+  replacePatternPaint(inner);
   dropUnreferencedDefs(inner);
+  stripComments(inner);
 
   // currentColor has nothing to inherit from once the root is gone
   const color = root.getAttribute('color') || /(?:^|;)\s*color\s*:\s*([^;]+)/i.exec(root.getAttribute('style') || '')?.[1]?.trim() || '#000000';
@@ -224,6 +227,167 @@ function expandUses(inner: XMLDocument) {
   }
   // give up on pathological nesting
   for (const u of Array.from(inner.getElementsByTagNameNS(SVG_NS, 'use'))) u.parentNode?.removeChild(u);
+}
+
+/** Paint value `url(#id)` -> id, else null. */
+function paintRef(v: string | null): string | null {
+  const m = /^\s*url\(\s*["']?#([^"')\s]+)["']?\s*\)/.exec(v || '');
+  return m ? m[1] : null;
+}
+
+/** Presentation attribute of an element, inherited from its ancestors (attribute or inline style). */
+function inheritedAttr(el: Element | null, name: string): string | null {
+  for (let e: Element | null = el; e; e = e.parentElement) {
+    const v = e.getAttribute(name);
+    if (v !== null && v.trim() !== '') return v;
+    const m = new RegExp(`(?:^|;)\\s*${name}\\s*:\\s*([^;]+)`, 'i').exec(e.getAttribute('style') || '');
+    if (m) return m[1].trim();
+  }
+  return null;
+}
+
+/** Points along a shape (local coordinates) through the browser's path measurement. */
+function shapeGeometry(inner: XMLDocument, shape: Element): { len: number; at: (d: number) => { x: number; y: number }; vertices: { x: number; y: number }[] } | null {
+  const host = document.createElementNS(SVG_NS, 'svg');
+  host.setAttribute('width', '0');
+  host.setAttribute('height', '0');
+  host.style.position = 'absolute';
+  host.style.visibility = 'hidden';
+  const live = document.importNode(shape, false) as Element;
+  live.removeAttribute('transform');
+  host.appendChild(live);
+  document.body.appendChild(host);
+  try {
+    const geo = live as unknown as { getTotalLength?: () => number; getPointAtLength?: (d: number) => { x: number; y: number } };
+    if (typeof geo.getTotalLength !== 'function' || typeof geo.getPointAtLength !== 'function') return null;
+    const len = geo.getTotalLength();
+    if (!isFinite(len)) return null;
+    const pts: { x: number; y: number }[] = [];
+    for (let i = 0; i <= 64; i++) {
+      const p = geo.getPointAtLength((len * i) / 64);
+      pts.push({ x: p.x, y: p.y });
+    }
+    const vertices: { x: number; y: number }[] = [];
+    const tag = shape.localName;
+    if (tag === 'polyline' || tag === 'polygon') {
+      const nums = (shape.getAttribute('points') || '').trim().split(/[\s,]+/).map(Number);
+      for (let i = 0; i + 1 < nums.length; i += 2) vertices.push({ x: nums[i], y: nums[i + 1] });
+    }
+    return { len, at: (d: number) => pts[Math.max(0, Math.min(64, Math.round((d / len) * 64)))], vertices };
+  } catch {
+    return null;
+  } finally {
+    document.body.removeChild(host);
+  }
+}
+
+/**
+ * Draw markers (arrowheads) as real geometry next to the shapes that use them:
+ * Office's SVG importer ignores marker-start / marker-end, so every arrow would
+ * lose its head.
+ */
+function expandMarkers(inner: XMLDocument) {
+  const markers = new Map<string, Element>();
+  for (const m of Array.from(inner.getElementsByTagNameNS(SVG_NS, 'marker'))) {
+    const id = m.getAttribute('id');
+    if (id) markers.set(id, m);
+  }
+  if (!markers.size) return;
+  const PROPS = ['marker-start', 'marker-mid', 'marker-end'] as const;
+  for (const shape of Array.from(inner.getElementsByTagName('*'))) {
+    if (shape.localName === 'marker' || shape.closest('marker')) continue;
+    const refs = PROPS.map((p) => paintRef(inheritedAttr(shape, p) ?? inheritedAttr(shape, 'marker')));
+    if (!refs.some(Boolean)) continue;
+    const parent = shape.parentNode;
+    if (!parent) continue;
+    const geo = shapeGeometry(inner, shape);
+    for (const p of PROPS) shape.removeAttribute(p);
+    shape.removeAttribute('marker');
+    if (!geo || geo.len <= 0) continue;
+    const eps = Math.min(1, geo.len / 10);
+    const angle = (a: { x: number; y: number }, b: { x: number; y: number }) => (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
+    const strokeWidth = parseFloat(inheritedAttr(shape, 'stroke-width') || '1') || 1;
+    const heads: { marker: Element; p: { x: number; y: number }; dir: number; start: boolean }[] = [];
+    const [startRef, midRef, endRef] = refs;
+    if (startRef && markers.has(startRef)) heads.push({ marker: markers.get(startRef)!, p: geo.at(0), dir: angle(geo.at(0), geo.at(eps)), start: true });
+    if (midRef && markers.has(midRef)) {
+      for (let i = 1; i + 1 < geo.vertices.length; i++) {
+        const v = geo.vertices[i];
+        heads.push({ marker: markers.get(midRef)!, p: v, dir: (angle(geo.vertices[i - 1], v) + angle(v, geo.vertices[i + 1])) / 2, start: false });
+      }
+    }
+    if (endRef && markers.has(endRef)) heads.push({ marker: markers.get(endRef)!, p: geo.at(geo.len), dir: angle(geo.at(geo.len - eps), geo.at(geo.len)), start: false });
+    if (!heads.length) continue;
+    const wrap = inner.createElementNS(SVG_NS, 'g');
+    const shapeTr = shape.getAttribute('transform');
+    if (shapeTr) wrap.setAttribute('transform', shapeTr);
+    for (const h of heads) {
+      const m = h.marker;
+      const orient = (m.getAttribute('orient') || '0').trim();
+      let rot = 0;
+      if (orient === 'auto') rot = h.dir;
+      else if (orient === 'auto-start-reverse') rot = h.start ? h.dir + 180 : h.dir;
+      else rot = parseFloat(orient) || 0;
+      const unitScale = (m.getAttribute('markerUnits') || 'strokeWidth') === 'userSpaceOnUse' ? 1 : strokeWidth;
+      const mw = parseFloat(m.getAttribute('markerWidth') || '3') || 3;
+      const mh = parseFloat(m.getAttribute('markerHeight') || '3') || 3;
+      let k = 1;
+      const vb = (m.getAttribute('viewBox') || '').trim().split(/[\s,]+/).map(Number);
+      if (vb.length === 4 && vb[2] > 0 && vb[3] > 0) k = Math.min(mw / vb[2], mh / vb[3]);
+      const refX = parseFloat(m.getAttribute('refX') || '0') || 0;
+      const refY = parseFloat(m.getAttribute('refY') || '0') || 0;
+      const g = inner.createElementNS(SVG_NS, 'g');
+      for (const a of Array.from(m.attributes)) {
+        if (['id', 'orient', 'markerUnits', 'markerWidth', 'markerHeight', 'refX', 'refY', 'viewBox', 'preserveAspectRatio', 'overflow', 'style', 'class'].includes(a.name)) continue;
+        g.setAttribute(a.name, a.value);
+      }
+      g.setAttribute('transform', `translate(${fmt(h.p.x)} ${fmt(h.p.y)}) rotate(${fmt(rot)}) scale(${fmt(unitScale * k)}) translate(${fmt(-refX)} ${fmt(-refY)})`);
+      for (const child of Array.from(m.childNodes)) {
+        const copy = child.cloneNode(true);
+        if (copy.nodeType === 1) {
+          (copy as Element).removeAttribute('id');
+          for (const d of Array.from((copy as Element).getElementsByTagName('*'))) d.removeAttribute('id');
+        }
+        g.appendChild(copy);
+      }
+      wrap.appendChild(g);
+    }
+    parent.insertBefore(wrap, shape.nextSibling);
+  }
+}
+
+/** Office cannot paint with <pattern>: use a translucent solid colour taken from the pattern instead. */
+function replacePatternPaint(inner: XMLDocument) {
+  const patterns = new Map<string, Element>();
+  for (const p of Array.from(inner.getElementsByTagNameNS(SVG_NS, 'pattern'))) {
+    const id = p.getAttribute('id');
+    if (id) patterns.set(id, p);
+  }
+  if (!patterns.size) return;
+  const colourOf = (p: Element): string => {
+    for (const el of Array.from(p.getElementsByTagName('*'))) {
+      for (const a of ['fill', 'stroke']) {
+        const v = el.getAttribute(a);
+        if (v && v !== 'none' && !paintRef(v)) return v;
+      }
+    }
+    return '#808080';
+  };
+  for (const el of Array.from(inner.getElementsByTagName('*'))) {
+    for (const a of ['fill', 'stroke'] as const) {
+      const id = paintRef(el.getAttribute(a));
+      if (!id || !patterns.has(id)) continue;
+      el.setAttribute(a, colourOf(patterns.get(id)!));
+      if (!el.hasAttribute(`${a}-opacity`)) el.setAttribute(`${a}-opacity`, '0.45');
+    }
+  }
+}
+
+function stripComments(inner: XMLDocument) {
+  const walker = inner.createTreeWalker(inner, NodeFilter.SHOW_COMMENT);
+  const found: Node[] = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) found.push(n);
+  for (const n of found) n.parentNode?.removeChild(n);
 }
 
 /** Drop <defs> children (glyph paths of a font cache …) that nothing references any more. */
