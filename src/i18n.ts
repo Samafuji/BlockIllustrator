@@ -447,6 +447,9 @@ const D: Record<string, [string, string]> = {
   '前面へ（一段）': ['Bring forward', '上移一層'],
   '背面へ（一段）': ['Send backward', '下移一層'],
   '重なり順': ['Order', '疊放順序'],
+  '線の下に描く（背景パネル）': ['Draw under the lines (background panel)', '畫在線條下方（背景面板）'],
+  '背景パネルや囲い枠に。接続線がこの図形の上に描かれます（コードでは back）': ['For background panels and frames: connection lines are drawn over this shape (`back` in the code)', '用於背景面板或外框：接線會畫在此圖形之上（程式碼中為 back）'],
+  '背景パネルや囲い枠は「線の下に描く」（または最背面へ）にすると、接続線がその上を通ります（コードでは back）': ['Set a background panel or frame to "Draw under the lines" (or send it to the back) so that connection lines pass over it (`back` in the code)', '背景面板或外框設為「畫在線條下方」（或移到最後）後，接線會從其上方通過（程式碼中為 back）'],
   '重なり順: 書式バーの最前面/最背面ボタン、または Ctrl+] / Ctrl+[（Shift で最前面 / 最背面）。コードでは後に書いたものが前に描かれます': ['Stacking order: the front/back buttons in the format bar, or Ctrl+] / Ctrl+[ (with Shift: to the very front / back). In the code, later statements are drawn in front', '疊放順序：格式列的最前/最後按鈕，或 Ctrl+] / Ctrl+[ (加 Shift 為最前/最後)。程式碼中後寫的會畫在前面'],
   // ---- parser
   'align の位置 (left|center|right)': ['an alignment (left|center|right)', '對齊位置 (left|center|right)'],

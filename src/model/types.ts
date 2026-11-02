@@ -84,6 +84,8 @@ export interface DNode {
   textAlign?: TextAlign;
   /** rotation in degrees: 0 | 90 | 180 | 270 (the shape and its label turn together) */
   rotate?: number;
+  /** background layer: drawn underneath the connection lines (panels / group frames) */
+  back?: boolean;
 }
 
 /** Embedded images: name -> data URL (`asset name "data:image/png;base64,..."`). */

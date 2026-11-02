@@ -1011,6 +1011,20 @@ export const useStore = create<StoreState>((set, get) => {
         return out;
       };
       get().commit((d) => {
+        // nodes also have a background layer (`back`, underneath the lines): the very back
+        // / front commands switch it, the one-step commands cross it at the ends of the order
+        const picked = d.nodes.filter((n) => nodeIds.has(n.id));
+        if (how === 'back') for (const n of picked) n.back = true;
+        else if (how === 'front') for (const n of picked) delete n.back;
+        else if (how === 'forward' && picked.length > 0 && picked.every((n) => n.back)) {
+          for (const n of picked) delete n.back;
+          d.edges = move(d.edges, edgeIds);
+          return;
+        } else if (how === 'backward' && picked.length > 0 && picked.every((n) => !n.back) && move(d.nodes, nodeIds) === d.nodes) {
+          for (const n of picked) n.back = true;
+          d.edges = move(d.edges, edgeIds);
+          return;
+        }
         d.nodes = move(d.nodes, nodeIds);
         d.edges = move(d.edges, edgeIds);
       });

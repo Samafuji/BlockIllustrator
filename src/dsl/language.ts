@@ -71,6 +71,8 @@ const ATTR_WORDS = new Set([
   'font',
   'align',
   'rotate',
+  'back',
+  'front',
   'arrowsize',
   'jump',
   'nojump',

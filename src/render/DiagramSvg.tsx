@@ -1,6 +1,6 @@
 import React from 'react';
 import { Box, perpLeft } from '../geometry/geometry';
-import { ArrowKind, Assets, DEdge, DStyle, Point, edgeTextDefaults, resolveEdgeText, resolveNode, resolveSrc } from '../model/types';
+import { ArrowKind, Assets, DEdge, DNode, DStyle, Point, edgeTextDefaults, resolveEdgeText, resolveNode, resolveSrc } from '../model/types';
 import { LabelSvg } from './label';
 import { DiagramLayout, EdgeLayout, Jump, junctionDotVisible, nodeLabelLocalPos, shapeBox } from './layout';
 
@@ -321,8 +321,12 @@ export function DiagramContent({ layout, mode, selection, hoverNode }: DiagramSv
   const { diagram, boxes, labels, edges } = layout;
   const s = diagram.style;
   const edit = mode === 'edit';
+  // nodes marked `back` (panels, group frames) sit underneath the connection lines
+  const backNodes = diagram.nodes.filter((n) => n.back);
+  const frontNodes = diagram.nodes.filter((n) => !n.back);
   return (
     <>
+      {backNodes.length > 0 && <g className="nodes back">{backNodes.map(renderNode)}</g>}
       <g className="edges">
         {edges.map((el) => (
           <EdgeShape
@@ -335,8 +339,11 @@ export function DiagramContent({ layout, mode, selection, hoverNode }: DiagramSv
           />
         ))}
       </g>
-      <g className="nodes">
-        {diagram.nodes.map((n) => {
+      <g className="nodes">{frontNodes.map(renderNode)}</g>
+    </>
+  );
+
+  function renderNode(n: DNode) {
           const box = boxes.get(n.id)!;
           const lay = labels.get(n.id)!;
           const selected = !!selection?.nodes.has(n.id);
@@ -385,10 +392,7 @@ export function DiagramContent({ layout, mode, selection, hoverNode }: DiagramSv
               )}
             </g>
           );
-        })}
-      </g>
-    </>
-  );
+  }
 }
 
 /** Standalone SVG document used for export. */

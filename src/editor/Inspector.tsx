@@ -506,6 +506,7 @@ const HELP_ITEMS: string[] = [
   'ラベルの一部だけ書式を変えるには、ラベル欄で文字を選択して B / I / U / 色のボタンを押します（<b>…</b> などのタグ）',
   '線が交差するところには自動でジャンプ（跨ぎ）が描かれます（全体スタイルのジャンプ半径で調整、0 で無効）',
   '重なり順: 書式バーの最前面/最背面ボタン、または Ctrl+] / Ctrl+[（Shift で最前面 / 最背面）。コードでは後に書いたものが前に描かれます',
+  '背景パネルや囲い枠は「線の下に描く」（または最背面へ）にすると、接続線がその上を通ります（コードでは back）',
   'Alt を押しながらドラッグするとグリッド・整列ガイド・角度のスナップを一時的に解除して自由に動かせます。矢印キーで 1px、Shift+矢印でグリッド単位の微調整',
   'ノード上の青い○ (ポート) から別ノードへドラッグで接続。または「接続」モード (C)',
   '線を選択 → ▬ で区間移動、■ で曲がり角移動、○ で曲がり角追加。線をダブルクリックで分岐点',
@@ -709,6 +710,10 @@ function NodeInspector({ node }: { node: DNode }) {
         </button>
       </div>
       <ZOrderRow />
+      <label className="check" title={t('背景パネルや囲い枠に。接続線がこの図形の上に描かれます（コードでは back）')}>
+        <input type="checkbox" checked={!!node.back} onChange={(e) => upd({ back: e.target.checked || undefined })} />
+        {t('線の下に描く（背景パネル）')}
+      </label>
       <p className="muted">{t('接続を作るには、ノードにカーソルを合わせて現れる青い○（ポート）から別のノードへドラッグします。')}</p>
     </div>
   );
@@ -1018,6 +1023,16 @@ function MultiInspector({ ids, labelIds }: { ids: string[]; labelIds: string[] }
         </button>
       </div>
       <ZOrderRow />
+      {ids.length > 0 && (
+        <label className="check" title={t('背景パネルや囲い枠に。接続線がこの図形の上に描かれます（コードでは back）')}>
+          <input
+            type="checkbox"
+            checked={ids.every((id) => diagram.nodes.find((n) => n.id === id)?.back)}
+            onChange={(e) => setAll({ back: e.target.checked || undefined })}
+          />
+          {t('線の下に描く（背景パネル）')}
+        </label>
+      )}
     </div>
   );
 }

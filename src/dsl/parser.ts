@@ -420,6 +420,7 @@ interface AttrTarget extends TypeDefaults {
   src?: string;
   underline?: boolean;
   rotate?: number;
+  back?: boolean;
 }
 
 /** `align left|center|right` (also accepts l / c / r). */
@@ -504,6 +505,16 @@ function parseAttrs(o: AttrTarget, c: Cursor, opts: { allowPosition: boolean; st
       case 'flip':
         nodeOnly(t);
         o.flip = true;
+        break;
+      case 'back':
+      case 'behind':
+      case 'background':
+        nodeOnly(t);
+        o.back = true;
+        break;
+      case 'front':
+        nodeOnly(t);
+        o.back = false;
         break;
       case 'hidden':
       case 'nodot':

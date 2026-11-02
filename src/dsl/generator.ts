@@ -40,7 +40,7 @@ function fontTok(f: string): string {
 }
 
 export function attrParts(
-  o: TypeDefaults & { flip?: boolean; hidden?: boolean; labelOffset?: Point; underline?: boolean; rotate?: number },
+  o: TypeDefaults & { flip?: boolean; hidden?: boolean; labelOffset?: Point; underline?: boolean; rotate?: number; back?: boolean },
   type: NodeType,
 ): string[] {
   const parts: string[] = [];
@@ -71,6 +71,7 @@ export function attrParts(
   if (o.font !== undefined) parts.push(`font ${fontTok(o.font)}`);
   if (o.textAlign !== undefined) parts.push(`align ${o.textAlign}`);
   if (o.rotate) parts.push(`rotate ${fmtNum(o.rotate)}`);
+  if (o.back) parts.push('back');
   return parts;
 }
 
