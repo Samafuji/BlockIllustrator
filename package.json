@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:cli": "vite build -c vite.cli.config.ts",
+    "render": "node skill/block-illustrator/scripts/render.mjs",
+    "skill:install": "node tools/install-skill.mjs"
   },
   "dependencies": {
     "@codemirror/commands": "^6.8.1",
@@ -23,6 +26,8 @@
     "zustand": "^5.0.6"
   },
   "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "@types/node": "^26.6.6",
     "@types/react": "^18.3.23",
     "@types/react-dom": "^18.3.7",
     "@vitejs/plugin-react": "^4.6.0",

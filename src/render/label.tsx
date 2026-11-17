@@ -45,20 +45,58 @@ export const SMALL_FACTOR = 0.8;
 export const BIG_FACTOR = 1.25;
 
 let ctx: CanvasRenderingContext2D | null = null;
+let ctxTried = false;
 const widthCache = new Map<string, number>();
+
+// Advance widths of Arial / Helvetica (1/1000 em) for printable ASCII, starting at U+0020.
+// Used when no <canvas> is available (headless rendering with Node.js).
+const ARIAL_WIDTHS = [
+  278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278, // space ! " # $ % & ' ( ) * + , - . /
+  556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556, // 0-9 : ; < = > ?
+  1015, 667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778, // @ A-O
+  667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 278, 278, 278, 469, 556, // P-Z [ \ ] ^ _
+  333, 556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833, 556, 556, // ` a-o
+  556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584, // p-z { | } ~
+];
+
+/** Approximate text width without a canvas (font metrics table). */
+function estimateWidth(text: string, fontSize: number, font: string, bold: boolean): number {
+  let units = 0;
+  for (const ch of text) {
+    const c = ch.codePointAt(0) ?? 0;
+    if (c >= 0x20 && c <= 0x7e) units += ARIAL_WIDTHS[c - 0x20];
+    else if (c >= 0x2e80 || (c >= 0x1100 && c <= 0x11ff)) units += 1000; // CJK (full width)
+    else if (c < 0x20) units += 0;
+    else units += 556;
+  }
+  let w = (units / 1000) * fontSize;
+  if (bold) w *= 1.06;
+  const f = font.toLowerCase();
+  if (/times|georgia|cambria|garamond|serif/.test(f) && !/sans-serif/.test(f.split(',')[0] || '')) w *= 0.92;
+  if (/consolas|courier|monospace|menlo|monaco/.test(f)) w = text.length * fontSize * 0.6;
+  return w;
+}
 
 export function measureText(text: string, fontSize: number, font: string, bold = false, italic = false): number {
   const key = `${fontSize}|${bold ? 'b' : ''}${italic ? 'i' : ''}|${font}|${text}`;
   const hit = widthCache.get(key);
   if (hit !== undefined) return hit;
-  if (!ctx) {
-    const c = document.createElement('canvas');
-    ctx = c.getContext('2d');
+  if (!ctx && !ctxTried) {
+    ctxTried = true;
+    if (typeof document !== 'undefined') {
+      try {
+        ctx = document.createElement('canvas').getContext('2d');
+      } catch {
+        ctx = null;
+      }
+    }
   }
-  let w = text.length * fontSize * 0.6;
+  let w: number;
   if (ctx) {
     ctx.font = `${italic ? 'italic ' : ''}${bold ? 'bold ' : ''}${fontSize}px ${font}`;
     w = ctx.measureText(text).width;
+  } else {
+    w = estimateWidth(text, fontSize, font, bold);
   }
   widthCache.set(key, w);
   return w;

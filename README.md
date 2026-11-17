@@ -37,6 +37,38 @@ npm run dev      # http://localhost:5173
 npm run build    # dist/index.html を再生成（1 ファイル完結）
 ```
 
+### コマンドラインで描画する（ブラウザ不要）
+
+`skill/block-illustrator/scripts/render.mjs` は Node.js だけで `.bd` を SVG / PNG にする描画スクリプトです（アプリと同じ描画コードを 1 ファイルに束ねたもの）。
+
+```bash
+npm run render -- figure.bd            # figure.svg を書き出す
+npm run render -- figure.bd --png 2    # figure.svg と figure.png (2 倍) を書き出す
+node skill/block-illustrator/scripts/render.mjs figure.bd -o out.png
+```
+
+構文エラーは `line N: メッセージ` の形で stderr に出ます（図は書き出され、終了コードは 1）。PNG 出力には `@resvg/resvg-js`（devDependencies に含まれています）が必要です。ソースを変えたら `npm run build:cli` で作り直してください。
+
+### Claude Code から使う（スキル）
+
+`skill/block-illustrator/` は [Claude Code](https://claude.com/claude-code) 用のスキルです。DSL の仕様（`reference/dsl.md`）と上の描画スクリプトが入っているので、Claude に「ブロック線図を描いて」と頼むと `.bd` を書き、SVG / PNG に描画して自分で確認するところまで自動で行います。
+
+**組み込み方（Node.js が必要）**
+
+```bash
+git clone https://github.com/Samafuji/BlockIllustrator.git
+cd BlockIllustrator
+npm install            # PNG 出力に使う @resvg/resvg-js を入れる（省略すると SVG のみ）
+npm run skill:install  # ~/.claude/skills/block-illustrator にコピー
+```
+
+- 描画スクリプト (`scripts/render.mjs`) はビルド済みでリポジトリに含まれているので、`npm run build` は不要です。
+- コピー先の SKILL.md にはクローンしたリポジトリの場所が書き込まれ、PNG 用のモジュールも同梱されます。Claude Code は `~/.claude/skills` を監視しているので、すぐに使えます（スキルが一覧に出ないときは `/reload-skills`）。
+- 特定のプロジェクトだけで使いたいときは、そのプロジェクトの `.claude/skills/block-illustrator` にコピーします:
+  `node tools/install-skill.mjs <プロジェクト>/.claude/skills/block-illustrator`
+- `/skills` で一覧と有効/無効の切り替え、`/block-illustrator 〜の図を描いて` で明示的に呼び出せます。
+- `git pull` でリポジトリを更新したら、もう一度 `npm run skill:install` を実行してください。描画コードを自分で変えた場合は先に `npm run build:cli`。
+
 
 
 ---

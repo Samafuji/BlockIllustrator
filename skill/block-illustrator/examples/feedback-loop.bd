@@ -1,0 +1,21 @@
+// Standard feedback control loop
+style {
+  fontSize: 14
+  lineWidth: 1.5
+  blockWidth: 110
+  blockHeight: 50
+}
+
+text r "$r(t)$" at (40, 150)
+sum s1 at (120, 150)
+block ctrl "Controller\n$C(s)$" at (250, 150)
+block plant "Plant\n$P(s)$" at (430, 150)
+junction j1 at (550, 150)
+text y "$y(t)$" at (630, 150)
+
+r -> s1 sign "+"
+s1 -> ctrl label "$e(t)$"
+ctrl -> plant label "$u(t)$"
+plant -> j1
+j1 -> y
+j1 -> s1 sign "-" via (550, 240) (120, 240)
