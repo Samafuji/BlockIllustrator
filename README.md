@@ -62,6 +62,7 @@ npm install            # PNG 出力に使う @resvg/resvg-js を入れる（省�
 npm run skill:install  # ~/.claude/skills/block-illustrator にコピー
 ```
 
+- Claude Code にまかせる場合は、clone したフォルダで Claude を開いて「このリポジトリのスキルを使えるようにして」と頼めば、[CLAUDE.md](CLAUDE.md) の手順に沿って上のコマンドを実行します。
 - 描画スクリプト (`scripts/render.mjs`) はビルド済みでリポジトリに含まれているので、`npm run build` は不要です。
 - コピー先の SKILL.md にはクローンしたリポジトリの場所が書き込まれ、PNG 用のモジュールも同梱されます。Claude Code は `~/.claude/skills` を監視しているので、すぐに使えます（スキルが一覧に出ないときは `/reload-skills`）。
 - 特定のプロジェクトだけで使いたいときは、そのプロジェクトの `.claude/skills/block-illustrator` にコピーします:
