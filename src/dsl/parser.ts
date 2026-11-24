@@ -19,6 +19,7 @@ import {
   TypeDefaults,
 } from '../model/types';
 import { t as tr } from '../i18n';
+import { stripXmlInvalid } from '../model/text';
 
 // ---------------------------------------------------------------------------
 // Tokenizer
@@ -66,7 +67,8 @@ export function tokenizeLine(line: string): Token[] {
       }
       if (i >= n) throw new Error(tr('文字列が閉じられていません (")'));
       i++; // closing quote
-      toks.push({ kind: 'str', value: s, col: start });
+      // control characters (e.g. U+000B from text pasted out of PowerPoint) would break the exported SVG
+      toks.push({ kind: 'str', value: stripXmlInvalid(s), col: start });
       continue;
     }
     if (c === '#') {

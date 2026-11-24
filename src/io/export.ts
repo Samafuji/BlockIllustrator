@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { jsPDF } from 'jspdf';
 import 'svg2pdf.js';
 import { Diagram } from '../model/types';
+import { stripXmlInvalid } from '../model/text';
 import { ExportSvg, exportSize } from '../render/DiagramSvg';
 import { layoutDiagram } from '../render/layout';
 import { RasterImage, svgToEps } from './eps';
@@ -25,7 +26,8 @@ export interface SvgResult {
 export function buildSvg(diagram: Diagram, opts: { inlineSvg?: boolean } = {}): SvgResult {
   const layout = layoutDiagram(diagram);
   const size = exportSize(layout);
-  let markup = renderToStaticMarkup(createElement(ExportSvg, { layout }));
+  // last line of defence: one control character makes the whole file unreadable as XML
+  let markup = stripXmlInvalid(renderToStaticMarkup(createElement(ExportSvg, { layout })));
   if (opts.inlineSvg !== false && /data:image\/svg\+xml/i.test(markup)) markup = inlineSvgImages(markup);
   return { svg: '<?xml version="1.0" encoding="UTF-8"?>\n' + markup, w: size.w, h: size.h };
 }

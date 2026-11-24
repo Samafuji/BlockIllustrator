@@ -1,4 +1,5 @@
 import { DEFAULT_STYLE, DEdge, DNode, DStyle, Diagram, NODE_TYPES, NodeType, STYLE_KEYS, StyleKey, TypeDefaults, Point } from '../model/types';
+import { stripXmlInvalid } from '../model/text';
 import { ParseResult, Span } from './parser';
 
 // ---------------------------------------------------------------------------
@@ -12,6 +13,7 @@ export function fmtNum(n: number): string {
 
 export function quote(s: string): string {
   // Mirror of the tokenizer: backslashes inside $...$ are literal.
+  s = stripXmlInvalid(s);
   let out = '';
   let inMath = false;
   for (let i = 0; i < s.length; i++) {

@@ -4001,6 +4001,10 @@ function t(ja, params) {
   if (params) for (const k of Object.keys(params)) s = s.split(`{${k}}`).join(String(params[k]));
   return s;
 }
+const XML_INVALID = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F￾￿]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+function stripXmlInvalid(s) {
+  return s.replace(XML_INVALID, "");
+}
 function tokenizeLine(line) {
   const toks = [];
   let i = 0;
@@ -4034,7 +4038,7 @@ function tokenizeLine(line) {
       }
       if (i >= n) throw new Error(t('文字列が閉じられていません (")'));
       i++;
-      toks.push({ kind: "str", value: s, col: start });
+      toks.push({ kind: "str", value: stripXmlInvalid(s), col: start });
       continue;
     }
     if (c === "#") {
@@ -49790,7 +49794,7 @@ async function main() {
   for (const e of parsed.errors) console.error(`line ${e.line}: ${e.message}`);
   const layout = layoutDiagram(parsed.diagram);
   const size = exportSize(layout);
-  const svg2 = '<?xml version="1.0" encoding="UTF-8"?>\n' + server_nodeExports.renderToStaticMarkup(reactExports.createElement(ExportSvg, { layout }));
+  const svg2 = '<?xml version="1.0" encoding="UTF-8"?>\n' + stripXmlInvalid(server_nodeExports.renderToStaticMarkup(reactExports.createElement(ExportSvg, { layout })));
   const base = args.input === "-" ? "diagram" : args.input.replace(/\.[^./\\]+$/, "");
   let out = args.out ? resolve(args.out) : resolve(base + ".svg");
   let wantPng = args.png;

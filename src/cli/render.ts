@@ -9,6 +9,7 @@ import { dirname, resolve, extname } from 'node:path';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { parse } from '../dsl/parser';
+import { stripXmlInvalid } from '../model/text';
 import { layoutDiagram } from '../render/layout';
 import { ExportSvg, exportSize } from '../render/DiagramSvg';
 
@@ -66,7 +67,7 @@ async function main() {
 
   const layout = layoutDiagram(parsed.diagram);
   const size = exportSize(layout);
-  const svg = '<?xml version="1.0" encoding="UTF-8"?>\n' + renderToStaticMarkup(createElement(ExportSvg, { layout }));
+  const svg = '<?xml version="1.0" encoding="UTF-8"?>\n' + stripXmlInvalid(renderToStaticMarkup(createElement(ExportSvg, { layout })));
 
   const base = args.input === '-' ? 'diagram' : args.input.replace(/\.[^./\\]+$/, '');
   let out = args.out ? resolve(args.out) : resolve(base + '.svg');
