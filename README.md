@@ -98,6 +98,10 @@ Diagrams are saved as `.bd` text files on your own computer; nothing is uploaded
 | UI 言語 | 日本語 / English / 繁體中文（ツールバー右の 🌐 で切替。初回はブラウザの言語に合わせます） |
 | フォント | 全体スタイルの「フォント」でプリセット（Arial, Times New Roman, Georgia, Cambria, メイリオ, 游明朝, 微軟正黑體, Noto Sans CJK, Consolas）を選択、または任意の font-family を入力 |
 | 保存 | `.bd` テキストファイルとして保存・読み込み（Ctrl+S）。ブラウザにも自動保存 |
+| タブ | 複数の `.bd` を同時に開き、キャンバス上部のタブで切り替え（Illustrator 風）。ドラッグで並べ替え、× または中クリックで閉じる。Ctrl+Alt+N 新規 / Ctrl+Alt+W 閉じる / Ctrl+Alt+← → 切り替え。開いているタブはブラウザに自動保存され、次回も復元 |
+| ドラッグ＆ドロップ | `.bd` / `.pptx` ファイルをウィンドウのどこにでもドロップすると新しいタブで開く（Chrome / Edge ではそのまま Ctrl+S で上書き保存可）。画像ファイルはキャンバスにドロップすると画像ノードになる |
+| アプリとしてインストール | Chrome / Edge の「アプリをインストール」（ファイルメニューにも項目が出ます）でデスクトップアプリ化。以後 `.bd` ファイルをダブルクリックすると Block Illustrator で開き、起動中なら新しいタブに入ります（GitHub Pages または `serve.cmd` の URL で開いているときのみ。`dist/index.html` の直開きでは不可） |
+| PowerPoint 連携 | 「PowerPoint 用にコピー」→ PowerPoint で Ctrl+V → 右クリック「図形に変換」で個々の図形・文字を編集可。「PowerPoint (.pptx) をダウンロード」はブロックを図形、直線の接続をコネクタ（図形に接着）として書き出す。逆方向は `.pptx` を開く / ドロップ（スライドごとにタブ）、または PowerPoint でコピーした図形を「PowerPoint の図形を貼り付け」(Ctrl+V) で取り込み。詳細は下の「PowerPoint との行き来」 |
 | 元に戻す/やり直す | Ctrl+Z / Ctrl+Y（GUI 操作もコード編集も対象） |
 
 ## DSL リファレンス
@@ -216,6 +220,30 @@ block b "Plant" at (300, 100) bold italic underline align left rotate 90   // �
 - **PDF**: `jsPDF + svg2pdf` によるベクター PDF。フォントは PDF 標準フォント（Times / Helvetica / Courier）に置き換わります（Times New Roman 系のフォントは Times に）。日本語・中国語などの非ラテン文字を含む場合は「PDF (ブラウザ印刷)」を使うとフォントが保持されます。
 - **EPS**: 自前の SVG→PostScript 変換によるベクター EPS（LaTeX や Illustrator に取り込めます）。数式はアウトライン化されるので環境に依存しません。文字は PostScript 標準フォント（Times / Helvetica / Courier）で描かれ、日本語・中国語の文字は出力されません（`?` になります）。CJK を含む図は PDF (ブラウザ印刷) を使ってください。画像は RGB ラスタ（最長辺 1000 px、透過部分は白）として埋め込まれます。
 - **クリップボードに PNG をコピー**: PowerPoint / Word に Ctrl+V で貼り付けられます。
+
+### PowerPoint との行き来
+
+PowerPoint で貼り付けた図を PowerPoint 側でも編集したい、PowerPoint で直した図を Block Illustrator に戻したい、という往復のための機能です。
+
+**Block Illustrator → PowerPoint**
+
+| 方法 | 手順 | 向いている場面 |
+| --- | --- | --- |
+| PowerPoint 用にコピー | エクスポート → **PowerPoint 用にコピー**（選択した図形だけなら **選択範囲を PowerPoint 用にコピー**）→ PowerPoint で Ctrl+V。貼り付いた図を右クリック → **図形に変換** すると、ブロック・線・文字が個別の図形になります | 手早く貼りたいとき |
+| .pptx をダウンロード | エクスポート → **PowerPoint (.pptx) をダウンロード**。1 枚のスライドに、ブロック = 図形（四角 / 角丸 / 楕円 / ひし形 / フリーフォーム）、2 点の接続 = 図形に接着したコネクタ（ブロックを動かすと線が追従）、折れ線の接続 = フリーフォームの線、文字 = テキストとして入っています。スライド上で全選択 → コピーして自分の資料に貼り付けてください | PowerPoint 側で動かしながら編集したいとき |
+
+- 数式（`$...$`）は TeX のソースが斜体の文字として入ります。
+- 線の交差のジャンプは PowerPoint には無いので省かれます。
+
+**PowerPoint → Block Illustrator**
+
+| 方法 | 手順 |
+| --- | --- |
+| .pptx を開く | ファイル → 開く、またはウィンドウへドロップ。図形のあるスライドが 1 枚ずつタブになります。四角 → `block`、角丸 → `rounded`、楕円 → `circle`（小さく `+`/`Σ` 入りなら `sum`）、ひし形 → `diamond`、三角 → `gain`、コネクタ → 接続（接着先の図形同士をつなぐ）、テキストボックス → 近くの図形のラベル / 線のラベル / `text` ノード、画像 → `image` |
+| コピーした図形を貼り付け | PowerPoint で図形を選択してコピー → Block Illustrator で Ctrl+V または エクスポート → **PowerPoint の図形を貼り付け**。PowerPoint がクリップボードに置く SVG を読み取って図形に戻します（ブラウザが初回にクリップボードの読み取り許可を求めます。Chrome / Edge のみ） |
+| 図として保存した SVG を開く | PowerPoint で図形を右クリック → 図として保存 (SVG) → そのファイルを開く / ドロップ |
+
+Block Illustrator が書き出した `.pptx` は ID や種類を覚えているので、PowerPoint で動かして保存したものを開き直すと元の座標系・ID のまま戻ります。PowerPoint で最初から描いた図は見た目から推定するので、複雑な図形は四角に、グループ化は展開して読み込まれます。
 
 ## 技術構成
 

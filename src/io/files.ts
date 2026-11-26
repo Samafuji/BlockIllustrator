@@ -8,12 +8,20 @@ const PICKER_TYPES = [
   },
 ];
 
+/** What the Open dialog offers: diagrams, plus PowerPoint files / pictures that are converted. */
+const OPEN_TYPES = [
+  ...PICKER_TYPES,
+  { description: 'PowerPoint', accept: { 'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'] } },
+  { description: 'SVG (saved from PowerPoint)', accept: { 'image/svg+xml': ['.svg'] } },
+];
+
 /** Picker file types for exported pictures, by extension. */
 const EXPORT_TYPES: Record<string, { description: string; accept: Record<string, string[]> }> = {
   svg: { description: 'SVG image', accept: { 'image/svg+xml': ['.svg'] } },
   png: { description: 'PNG image', accept: { 'image/png': ['.png'] } },
   pdf: { description: 'PDF document', accept: { 'application/pdf': ['.pdf'] } },
   eps: { description: 'EPS (PostScript)', accept: { 'application/postscript': ['.eps'] } },
+  pptx: { description: 'PowerPoint', accept: { 'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'] } },
 };
 
 export interface FileRef {
@@ -120,30 +128,26 @@ export function downloadBlob(blob: Blob, name: string) {
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
-/** Open a file. Returns null if cancelled. */
-export async function openFile(): Promise<{ code: string; ref: FileRef } | null> {
+/** Open one or more files. Returns an empty list if cancelled. */
+export async function openFiles(): Promise<{ blob: Blob; ref: FileRef }[]> {
   if (typeof (window as any).showOpenFilePicker === 'function') {
     try {
-      const [handle]: FileSystemFileHandle[] = await (window as any).showOpenFilePicker({ types: PICKER_TYPES, multiple: false });
-      const file = await handle.getFile();
-      const code = await file.text();
-      return { code, ref: { name: handle.name, handle } };
+      const handles: FileSystemFileHandle[] = await (window as any).showOpenFilePicker({ types: OPEN_TYPES, multiple: true });
+      const out: { blob: Blob; ref: FileRef }[] = [];
+      for (const handle of handles) out.push({ blob: await handle.getFile(), ref: { name: handle.name, handle } });
+      return out;
     } catch (e) {
-      if ((e as Error).name === 'AbortError') return null;
+      if ((e as Error).name === 'AbortError') return [];
       throw e;
     }
   }
   return new Promise((resolve) => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.bd,.txt,text/plain';
-    input.onchange = async () => {
-      const f = input.files?.[0];
-      if (!f) return resolve(null);
-      const code = await f.text();
-      resolve({ code, ref: { name: f.name, handle: null } });
-    };
-    input.oncancel = () => resolve(null);
+    input.accept = '.bd,.txt,.pptx,.svg,text/plain';
+    input.multiple = true;
+    input.onchange = () => resolve(Array.from(input.files ?? []).map((f) => ({ blob: f, ref: { name: f.name, handle: null } })));
+    input.oncancel = () => resolve([]);
     input.click();
   });
 }

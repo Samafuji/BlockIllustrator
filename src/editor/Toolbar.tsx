@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { EXAMPLES } from '../examples';
 import { LANGS, Lang, useLang, useT } from '../i18n';
-import { exportActions, loadExample, newDiagram, openDiagram, saveDiagram } from '../io/actions';
+import { closeActiveTab, exportActions, loadExample, newDiagram, openDiagram, pasteFromPowerPoint, saveDiagram, useInstall } from '../io/actions';
 import { useStore } from '../store/useStore';
 import { canvasApi } from './canvasApi';
 import { FormatBar } from './FormatBar';
@@ -61,8 +61,7 @@ export function Toolbar() {
   const t = useT();
   const lang = useLang((s) => s.lang);
   const setLang = useLang((s) => s.setLang);
-  const fileName = useStore((s) => s.fileName);
-  const dirty = useStore((s) => s.dirty);
+  const installPrompt = useInstall((s) => s.prompt);
   const canUndo = useStore((s) => s.past.length > 0);
   const canRedo = useStore((s) => s.future.length > 0);
   const showGrid = useStore((s) => s.showGrid);
@@ -81,9 +80,9 @@ export function Toolbar() {
       <span className="brand">Block Illustrator</span>
       <Menu label={t('ファイル')}>
         <button className="menu-item" onClick={newDiagram}>
-          {t('新規作成')}
+          {t('新規作成')} <small>Ctrl+Alt+N</small>
         </button>
-        <button className="menu-item" onClick={openDiagram}>
+        <button className="menu-item" onClick={openDiagram} title={t('.bd のほか、PowerPoint (.pptx) や PowerPoint から保存した SVG も開けます（図形に変換されます）')}>
           {t('開く…')} <small>Ctrl+O</small>
         </button>
         <button className="menu-item" onClick={() => saveDiagram(false)}>
@@ -92,24 +91,28 @@ export function Toolbar() {
         <button className="menu-item" onClick={() => saveDiagram(true)}>
           {t('名前を付けて保存…')}
         </button>
+        <button className="menu-item" onClick={closeActiveTab}>
+          {t('タブを閉じる')} <small>Ctrl+Alt+W</small>
+        </button>
         <div className="menu-sep" />
         {EXAMPLES.map((ex, i) => (
           <button key={i} className="menu-item" onClick={() => loadExample(i)}>
             {t('サンプル')}: {t(ex.name)}
           </button>
         ))}
+        {installPrompt && (
+          <>
+            <div className="menu-sep" />
+            <button className="menu-item" onClick={() => void installPrompt()} title={t('インストールすると .bd ファイルのダブルクリックでこのアプリが開きます')}>
+              {t('アプリとしてインストール…')}
+            </button>
+          </>
+        )}
       </Menu>
       <button className="btn" onClick={() => saveDiagram(false)} title={t('保存 (Ctrl+S)')}>
         <span className="ico">💾</span>
         {t('保存')}
       </button>
-      <span className="filename" title={fileName ?? t('未保存')}>
-        {fileName ?? t('(無題)')}
-        {/* fixed-width marker so the toolbar does not reflow (and the canvas does not re-fit) on the first edit */}
-        <span className="dirty-mark" title={dirty ? t('未保存の変更があります') : ''}>
-          {dirty ? '●' : ''}
-        </span>
-      </span>
       <span className="sep" />
       <div className="btn-group">
         <button className="btn" disabled={!canUndo} onClick={() => st().undo()} title={t('元に戻す (Ctrl+Z)')}>
@@ -244,6 +247,31 @@ export function Toolbar() {
         </button>
         <button className="menu-item" onClick={exportActions.copySvg}>
           {t('SVG コードをコピー')}
+        </button>
+        <div className="menu-sep" />
+        <button
+          className="menu-item"
+          onClick={() => exportActions.copyForPowerPoint(false)}
+          title={t('PowerPoint で Ctrl+V すると SVG グラフィックとして貼り付きます。右クリック →「図形に変換」で個々の図形・文字を編集できます')}
+        >
+          {t('PowerPoint 用にコピー')} <small>{t('図形に変換で編集可')}</small>
+        </button>
+        <button className="menu-item" onClick={() => exportActions.copyForPowerPoint(true)} disabled={!hasSel}>
+          {t('選択範囲を PowerPoint 用にコピー')}
+        </button>
+        <button
+          className="menu-item"
+          onClick={exportActions.pptx}
+          title={t('ブロックは PowerPoint の図形、直線の接続はコネクタ、文字はテキストとして書き出します。スライドの図形をコピーして自分の資料に貼り付けてください')}
+        >
+          {t('PowerPoint (.pptx) をダウンロード')} <small>{t('編集可能な図形')}</small>
+        </button>
+        <button
+          className="menu-item"
+          onClick={() => void pasteFromPowerPoint()}
+          title={t('PowerPoint で図形を選択してコピーしたあと、ここを押すか Ctrl+V で取り込みます（初回はクリップボードの読み取り許可を求められます）')}
+        >
+          {t('PowerPoint の図形を貼り付け')}
         </button>
       </Menu>
     </div>

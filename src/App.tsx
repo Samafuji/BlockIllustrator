@@ -4,8 +4,20 @@ import { CodePanel } from './editor/CodePanel';
 import { Inspector } from './editor/Inspector';
 import { Toolbar } from './editor/Toolbar';
 import { Palette } from './editor/TypeDefaults';
+import { TabBar } from './editor/TabBar';
 import { useT } from './i18n';
-import { openDiagram, saveDiagram, useToast } from './io/actions';
+import {
+  closeActiveTab,
+  cycleTab,
+  newDiagram,
+  openDiagram,
+  openDroppedFiles,
+  openFileHandles,
+  pasteFromPowerPoint,
+  saveDiagram,
+  useToast,
+  watchInstallPrompt,
+} from './io/actions';
 import { imageFilesFromClipboard, importImageFiles } from './io/images';
 import { useStore } from './store/useStore';
 
@@ -62,6 +74,19 @@ export function App() {
       if (mod && key === 'o') {
         e.preventDefault();
         void openDiagram();
+        return;
+      }
+      // document tabs: Ctrl+Alt+N / W / ← / → (Ctrl+Tab too, where the browser passes it on)
+      if (mod && e.altKey && !e.shiftKey && (key === 'n' || key === 'w' || e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        e.preventDefault();
+        if (key === 'n') newDiagram();
+        else if (key === 'w') closeActiveTab();
+        else cycleTab(e.key === 'ArrowRight' ? 1 : -1);
+        return;
+      }
+      if (mod && !e.altKey && e.key === 'Tab') {
+        e.preventDefault();
+        cycleTab(e.shiftKey ? -1 : 1);
         return;
       }
       if (typing) return;
@@ -177,7 +202,16 @@ export function App() {
         return;
       }
       const text = e.clipboardData?.getData('text/plain');
-      if (text && useStore.getState().pasteText(text)) e.preventDefault();
+      if (text && useStore.getState().pasteText(text)) {
+        e.preventDefault();
+        return;
+      }
+      // shapes copied in PowerPoint arrive as SVG; the paste event only announces the type,
+      // the data has to be read through the clipboard API (asks for permission once)
+      if (e.clipboardData?.types.includes('image/svg+xml')) {
+        e.preventDefault();
+        void pasteFromPowerPoint();
+      }
     };
     document.addEventListener('copy', onCopy);
     document.addEventListener('cut', onCut);
@@ -191,7 +225,8 @@ export function App() {
 
   useEffect(() => {
     const onUnload = (e: BeforeUnloadEvent) => {
-      if (useStore.getState().dirty && useStore.getState().fileName) {
+      // any tab with unsaved changes to a named file (new untitled sketches are autosaved in the browser)
+      if (useStore.getState().tabs.some((t) => t.dirty && t.name)) {
         e.preventDefault();
         e.returnValue = '';
       }
@@ -200,9 +235,43 @@ export function App() {
     return () => window.removeEventListener('beforeunload', onUnload);
   }, []);
 
+  // .bd / .pptx files dropped anywhere on the window open as documents. Pictures dropped
+  // on the canvas are handled there (image nodes); elsewhere they are ignored.
+  useEffect(() => {
+    const onDragOver = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes('Files')) {
+        e.preventDefault();
+        if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+      }
+    };
+    const onDrop = (e: DragEvent) => {
+      if (!e.dataTransfer?.types.includes('Files')) return;
+      e.preventDefault();
+      openDroppedFiles(e.dataTransfer);
+    };
+    window.addEventListener('dragover', onDragOver);
+    window.addEventListener('drop', onDrop);
+    return () => {
+      window.removeEventListener('dragover', onDragOver);
+      window.removeEventListener('drop', onDrop);
+    };
+  }, []);
+
+  // installed as an app: files double-clicked in the file manager arrive here
+  useEffect(() => {
+    watchInstallPrompt();
+    const lq = (window as any).launchQueue;
+    if (lq && typeof lq.setConsumer === 'function') {
+      lq.setConsumer((params: { files?: FileSystemFileHandle[] }) => {
+        if (params.files?.length) void openFileHandles(params.files);
+      });
+    }
+  }, []);
+
   return (
     <div className="app">
       <Toolbar />
+      <TabBar />
       <div className={'main' + (showCode ? '' : ' no-code')}>
         {showCode && (
           <div className="panel left">

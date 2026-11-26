@@ -472,6 +472,25 @@ export async function copySvgToClipboard(diagram: Diagram) {
   await navigator.clipboard.writeText(svg);
 }
 
+/**
+ * Put the diagram on the clipboard as `image/svg+xml` (what PowerPoint itself uses when
+ * copying shapes) with a PNG beside it for applications that cannot take SVG. PowerPoint
+ * pastes the SVG as a graphic; "Convert to Shape" then turns it into editable shapes.
+ */
+export async function copySvgForPowerPoint(diagram: Diagram) {
+  const Item = (window as any).ClipboardItem;
+  if (!Item || !navigator.clipboard?.write) throw new Error(t('このブラウザは画像のクリップボードコピーに対応していません'));
+  const { svg } = buildSvg(diagram);
+  const data: Record<string, Blob> = { 'image/svg+xml': new Blob([svg], { type: 'image/svg+xml' }) };
+  if (typeof Item.supports === 'function' && !Item.supports('image/svg+xml')) throw new Error(t('このブラウザは SVG のクリップボードコピーに対応していません (Chrome / Edge を使ってください)'));
+  try {
+    data['image/png'] = await renderPng(diagram, 2);
+  } catch {
+    /* the SVG alone is enough */
+  }
+  await navigator.clipboard.write([new Item(data)]);
+}
+
 /** Map CSS font families to the jsPDF standard fonts (times / helvetica / courier). */
 function mapFontsForPdf(svg: string): string {
   return svg.replace(/font-family="([^"]*)"/g, (_m, fam: string) => {

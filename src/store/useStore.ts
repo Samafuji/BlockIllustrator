@@ -71,8 +71,12 @@ export interface ViewState {
   zoom: number;
 }
 
+/** autosave keys of versions before tabs (read once and migrated) */
 const AUTOSAVE_KEY = 'blockillustrator.autosave.v1';
 const ASSETS_KEY = 'blockillustrator.autosave.assets.v1';
+/** all open documents (code, name, dirty flag) and, separately, their embedded images */
+const TABS_KEY = 'blockillustrator.tabs.v1';
+const TABS_ASSETS_KEY = 'blockillustrator.tabs.assets.v1';
 const MAX_HISTORY = 200;
 
 export interface StoreState {
@@ -107,6 +111,21 @@ export interface StoreState {
   focusLabelRequest: number;
   /** line (0-based) to reveal in the code editor */
   revealLine: { line: number; v: number } | null;
+
+  // ---- documents (tabs)
+  tabs: DocTab[];
+  activeTab: string;
+  /** open a new document in a new tab (the empty canvas unless code is given) and make it active */
+  newTab: (code?: string, file?: FileInfo) => string;
+  switchTab: (id: string) => void;
+  /** close a tab without asking; the last tab is replaced by an empty document */
+  closeTab: (id: string) => void;
+  /** move a tab to another position */
+  moveTab: (id: string, index: number) => void;
+  /** the tab showing this file (same handle, or same name when there is no handle), if any */
+  findTab: (name: string, handle: FileSystemFileHandle | null) => Promise<string | null>;
+  /** the active tab is a new, untouched document (an opened file may replace it) */
+  isPristine: () => boolean;
 
   // ---- code side
   setCodeFromEditor: (code: string) => void;
@@ -212,27 +231,112 @@ function assignPatch<T extends object>(target: T, patch: Partial<T>): void {
 
 export type AlignMode = 'left' | 'hcenter' | 'right' | 'top' | 'vcenter' | 'bottom';
 
-function initialCode(): string {
-  try {
-    const saved = localStorage.getItem(AUTOSAVE_KEY);
-    if (saved && saved.trim()) return saved;
-  } catch {
-    /* ignore */
-  }
-  return EXAMPLES[0].code;
+// ---------------------------------------------------------------- documents / tabs
+
+/** A document shown as a tab. `name` / `dirty` mirror the live `fileName` / `dirty` for the active tab. */
+export interface DocTab {
+  id: string;
+  name: string | null;
+  dirty: boolean;
 }
 
-function initialAssets(): Assets {
+export interface FileInfo {
+  name: string | null;
+  handle: FileSystemFileHandle | null;
+}
+
+/** Everything that belongs to one document (what a tab switch swaps in and out). */
+interface DocState {
+  code: string;
+  assets: Assets;
+  selection: SelectionState;
+  view: ViewState;
+  past: string[];
+  future: string[];
+  fileName: string | null;
+  fileHandle: FileSystemFileHandle | null;
+  dirty: boolean;
+}
+
+/** Documents of the inactive tabs; the active one lives in the store itself. */
+const parkedDocs = new Map<string, DocState>();
+let tabSeq = 0;
+function newTabId(): string {
+  return `t${Date.now().toString(36)}${(tabSeq++).toString(36)}`;
+}
+
+/** Code of a brand-new document (the "empty canvas" example). */
+export function blankCode(): string {
+  return EXAMPLES[EXAMPLES.length - 1].code;
+}
+
+const DEFAULT_VIEW: ViewState = { x: 40, y: 40, zoom: 1 };
+const NO_SELECTION: SelectionState = { nodes: [], edges: [], labels: [] };
+
+interface SavedTabs {
+  active: string;
+  docs: { id: string; name: string | null; dirty: boolean; code: string }[];
+}
+
+function readJson<T>(key: string): T | null {
   try {
-    const saved = localStorage.getItem(ASSETS_KEY);
-    if (saved) {
-      const v = JSON.parse(saved);
-      if (v && typeof v === 'object') return v as Assets;
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Documents saved in the browser: the tabs blob, or (first start after the update) the
+ * single autosaved diagram of older versions, or the first example.
+ * Inactive documents go to `parkedDocs`; the active one is returned.
+ */
+function initialDocs(): { tabs: DocTab[]; active: string; doc: DocState } {
+  const park = (id: string, code: string, assets: Assets, fileName: string | null, dirty: boolean): DocState => ({
+    code,
+    assets,
+    selection: NO_SELECTION,
+    view: DEFAULT_VIEW,
+    past: [],
+    future: [],
+    fileName,
+    fileHandle: null,
+    dirty,
+  });
+  const saved = readJson<SavedTabs>(TABS_KEY);
+  if (saved && Array.isArray(saved.docs) && saved.docs.length > 0) {
+    const assetsAll = readJson<Record<string, Assets>>(TABS_ASSETS_KEY) ?? {};
+    const tabs: DocTab[] = [];
+    let active: DocState | null = null;
+    let activeId = '';
+    for (const d of saved.docs) {
+      if (!d || typeof d.id !== 'string' || typeof d.code !== 'string') continue;
+      const st = park(d.id, d.code, assetsAll[d.id] ?? {}, d.name ?? null, !!d.dirty);
+      tabs.push({ id: d.id, name: st.fileName, dirty: st.dirty });
+      if (d.id === saved.active || !active) {
+        if (active) parkedDocs.set(activeId, active);
+        active = st;
+        activeId = d.id;
+      } else parkedDocs.set(d.id, st);
     }
+    if (active && tabs.length) return { tabs, active: activeId, doc: active };
+  }
+  // older versions kept one diagram
+  let legacyCode: string | null = null;
+  let legacyAssets: Assets = {};
+  try {
+    legacyCode = localStorage.getItem(AUTOSAVE_KEY);
+    const a = readJson<Assets>(ASSETS_KEY);
+    if (a && typeof a === 'object') legacyAssets = a;
+    localStorage.removeItem(AUTOSAVE_KEY);
+    localStorage.removeItem(ASSETS_KEY);
   } catch {
     /* ignore */
   }
-  return {};
+  const id = newTabId();
+  const code = legacyCode && legacyCode.trim() ? legacyCode : EXAMPLES[0].code;
+  return { tabs: [{ id, name: null, dirty: false }], active: id, doc: park(id, code, legacyAssets, null, false) };
 }
 
 /** Parse the code and merge the separately stored images into the diagram. */
@@ -276,33 +380,101 @@ let autosaveTimer: number | undefined;
 let assetsTimer: number | undefined;
 let lastCommit: { key: string | null; time: number } = { key: null, time: 0 };
 let lastCopied: { text: string; pastes: number } | null = null;
-function scheduleAutosave(code: string) {
-  if (autosaveTimer) window.clearTimeout(autosaveTimer);
-  autosaveTimer = window.setTimeout(() => {
-    try {
-      localStorage.setItem(AUTOSAVE_KEY, code);
-    } catch {
-      /* ignore */
-    }
-  }, 500);
-}
 
 export const useStore = create<StoreState>((set, get) => {
-  const code0 = initialCode();
-  const assets0 = initialAssets();
-  const parse0 = parseWith(code0, assets0);
+  const init = initialDocs();
+  const parse0 = parseWith(init.doc.code, init.doc.assets);
 
-  function scheduleAssetsAutosave(assets: Assets) {
+  /** the document of a tab: the live store for the active one, the parked copy otherwise */
+  function docOf(id: string): DocState | undefined {
+    const st = get();
+    if (id === st.activeTab) {
+      return {
+        code: st.code,
+        assets: st.assets,
+        selection: st.selection,
+        view: st.view,
+        past: st.past,
+        future: st.future,
+        fileName: st.fileName,
+        fileHandle: st.fileHandle,
+        dirty: st.dirty,
+      };
+    }
+    return parkedDocs.get(id);
+  }
+
+  /** Save all open documents (code, names) to the browser, debounced. */
+  function scheduleAutosave() {
+    if (autosaveTimer) window.clearTimeout(autosaveTimer);
+    autosaveTimer = window.setTimeout(() => {
+      try {
+        const st = get();
+        const docs = st.tabs.map((t) => {
+          const d = docOf(t.id);
+          return { id: t.id, name: d?.fileName ?? t.name, dirty: d?.dirty ?? t.dirty, code: d?.code ?? '' };
+        });
+        const blob: SavedTabs = { active: st.activeTab, docs };
+        localStorage.setItem(TABS_KEY, JSON.stringify(blob));
+      } catch {
+        /* ignore */
+      }
+    }, 500);
+  }
+
+  /** Save the embedded images of all open documents, debounced (they can be too big for the browser). */
+  function scheduleAssetsAutosave() {
     if (assetsTimer) window.clearTimeout(assetsTimer);
     assetsTimer = window.setTimeout(() => {
       try {
-        if (Object.keys(assets).length === 0) localStorage.removeItem(ASSETS_KEY);
-        else localStorage.setItem(ASSETS_KEY, JSON.stringify(assets));
+        const st = get();
+        const all: Record<string, Assets> = {};
+        for (const t of st.tabs) {
+          const a = docOf(t.id)?.assets;
+          if (a && Object.keys(a).length > 0) all[t.id] = a;
+        }
+        if (Object.keys(all).length === 0) localStorage.removeItem(TABS_ASSETS_KEY);
+        else localStorage.setItem(TABS_ASSETS_KEY, JSON.stringify(all));
         if (get().autosaveWarning) set({ autosaveWarning: null });
       } catch {
         set({ autosaveWarning: '画像が大きいためブラウザには自動保存できません。ファイルに保存してください (Ctrl+S)' });
       }
     }, 500);
+  }
+
+  /** Put the active document aside (before another tab takes its place). */
+  function parkActive() {
+    const st = get();
+    if (!st.tabs.some((t) => t.id === st.activeTab)) return;
+    const d = docOf(st.activeTab);
+    if (d) parkedDocs.set(st.activeTab, d);
+  }
+
+  /** Make a parked document the active one (the current one must have been parked or removed). */
+  function activate(id: string) {
+    const d = parkedDocs.get(id);
+    if (!d) return;
+    parkedDocs.delete(id);
+    const p = parseWith(d.code, d.assets);
+    set({
+      activeTab: id,
+      code: d.code,
+      parse: p,
+      diagram: p.diagram,
+      assets: d.assets,
+      selection: d.selection,
+      view: d.view,
+      past: d.past,
+      future: d.future,
+      fileName: d.fileName,
+      fileHandle: d.fileHandle,
+      dirty: d.dirty,
+      codeVersion: get().codeVersion + 1,
+      hoverNode: null,
+      connectMode: false,
+      revealLine: null,
+    });
+    scheduleAutosave();
   }
 
   function pushHistory(prevCode: string) {
@@ -314,7 +486,7 @@ export const useStore = create<StoreState>((set, get) => {
   function applyCode(newCode: string, opts: { history?: boolean; fromEditor?: boolean; resetHistory?: boolean } = {}) {
     const st = get();
     const p = parseWith(newCode, st.assets);
-    scheduleAutosave(newCode);
+    scheduleAutosave();
     set({
       code: newCode,
       parse: p,
@@ -327,10 +499,10 @@ export const useStore = create<StoreState>((set, get) => {
   }
 
   return {
-    code: code0,
+    code: init.doc.code,
     parse: parse0,
     diagram: parse0.diagram,
-    assets: assets0,
+    assets: init.doc.assets,
     autosaveWarning: null,
     codeVersion: 0,
     selection: { nodes: [], edges: [], labels: [] },
@@ -346,11 +518,78 @@ export const useStore = create<StoreState>((set, get) => {
     },
     past: [],
     future: [],
-    fileName: null,
+    fileName: init.doc.fileName,
     fileHandle: null,
-    dirty: false,
+    dirty: init.doc.dirty,
     focusLabelRequest: 0,
     revealLine: null,
+
+    tabs: init.tabs,
+    activeTab: init.active,
+
+    newTab(code, file) {
+      parkActive();
+      const id = newTabId();
+      set({ tabs: [...get().tabs, { id, name: file?.name ?? null, dirty: false }], activeTab: id, view: DEFAULT_VIEW, hoverNode: null, connectMode: false, revealLine: null });
+      get().loadCode(code ?? blankCode(), file ?? undefined);
+      return id;
+    },
+
+    switchTab(id) {
+      const st = get();
+      if (id === st.activeTab || !st.tabs.some((t) => t.id === id)) return;
+      parkActive();
+      activate(id);
+    },
+
+    closeTab(id) {
+      const st = get();
+      const idx = st.tabs.findIndex((t) => t.id === id);
+      if (idx < 0) return;
+      const rest = st.tabs.filter((t) => t.id !== id);
+      if (id !== st.activeTab) {
+        parkedDocs.delete(id);
+        set({ tabs: rest });
+      } else if (rest.length === 0) {
+        set({ tabs: rest });
+        get().newTab();
+      } else {
+        set({ tabs: rest });
+        activate(rest[Math.min(idx, rest.length - 1)].id);
+      }
+      scheduleAutosave();
+      scheduleAssetsAutosave();
+    },
+
+    moveTab(id, index) {
+      const tabs = [...get().tabs];
+      const from = tabs.findIndex((t) => t.id === id);
+      if (from < 0) return;
+      const [tab] = tabs.splice(from, 1);
+      tabs.splice(Math.max(0, Math.min(index, tabs.length)), 0, tab);
+      set({ tabs });
+      scheduleAutosave();
+    },
+
+    async findTab(name, handle) {
+      for (const t of get().tabs) {
+        const d = docOf(t.id);
+        if (!d) continue;
+        if (handle && d.fileHandle) {
+          try {
+            if (await (d.fileHandle as any).isSameEntry(handle)) return t.id;
+          } catch {
+            /* ignore */
+          }
+        } else if (!handle && !d.fileHandle && d.fileName === name) return t.id;
+      }
+      return null;
+    },
+
+    isPristine() {
+      const st = get();
+      return !st.dirty && !st.fileName && st.code === blankCode();
+    },
 
     setCodeFromEditor(code) {
       if (code === get().code) return;
@@ -367,7 +606,7 @@ export const useStore = create<StoreState>((set, get) => {
     loadCode(text, file) {
       const { code, assets } = splitAssets(text);
       set({ assets });
-      scheduleAssetsAutosave(assets);
+      scheduleAssetsAutosave();
       applyCode(code, { resetHistory: true });
       set({
         selection: { nodes: [], edges: [], labels: [] },
@@ -400,7 +639,7 @@ export const useStore = create<StoreState>((set, get) => {
       const assets = { ...st.assets, [n]: data };
       const p = parseWith(st.code, assets);
       set({ assets, parse: p, diagram: p.diagram, dirty: true });
-      scheduleAssetsAutosave(assets);
+      scheduleAssetsAutosave();
       return n;
     },
 
@@ -416,6 +655,7 @@ export const useStore = create<StoreState>((set, get) => {
 
     markSaved(name, handle) {
       set({ fileName: name, fileHandle: handle, dirty: false });
+      scheduleAutosave();
     },
 
     liveUpdate(fn) {
@@ -452,7 +692,7 @@ export const useStore = create<StoreState>((set, get) => {
       if (st.past.length === 0) return;
       const prev = st.past[st.past.length - 1];
       const p = parseWith(prev, st.assets);
-      scheduleAutosave(prev);
+      scheduleAutosave();
       set({
         code: prev,
         parse: p,
@@ -470,7 +710,7 @@ export const useStore = create<StoreState>((set, get) => {
       if (st.future.length === 0) return;
       const next = st.future[0];
       const p = parseWith(next, st.assets);
-      scheduleAutosave(next);
+      scheduleAutosave();
       set({
         code: next,
         parse: p,
@@ -1119,3 +1359,11 @@ export function useSelectionSets() {
   const sel = useStore((s) => s.selection);
   return { nodes: new Set(sel.nodes), edges: new Set(sel.edges) };
 }
+
+// the tab strip shows the name / dirty flag of the active document
+useStore.subscribe((s, prev) => {
+  if (s.fileName === prev.fileName && s.dirty === prev.dirty && s.activeTab === prev.activeTab) return;
+  const tab = s.tabs.find((t) => t.id === s.activeTab);
+  if (!tab || (tab.name === s.fileName && tab.dirty === s.dirty)) return;
+  useStore.setState({ tabs: s.tabs.map((t) => (t.id === s.activeTab ? { ...t, name: s.fileName, dirty: s.dirty } : t)) });
+});
